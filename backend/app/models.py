@@ -17,12 +17,27 @@ class Product(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(180), index=True)
     barcode: Mapped[str | None] = mapped_column(String(80), unique=True, nullable=True)
+    brand: Mapped[str | None] = mapped_column(String(120), nullable=True)
     category: Mapped[str] = mapped_column(String(80), default="Outros")
+    package_content: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    unit: Mapped[str] = mapped_column(String(20), default="UN")
     stock: Mapped[int] = mapped_column(Integer, default=0)
     min_stock: Mapped[int] = mapped_column(Integer, default=0)
     cost: Mapped[float] = mapped_column(Numeric(12,2), default=0)
     price: Mapped[float] = mapped_column(Numeric(12,2), default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class CatalogProduct(Base):
+    __tablename__ = "catalog_products"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    barcode: Mapped[str] = mapped_column(String(14), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(240), index=True)
+    brand: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    category: Mapped[str] = mapped_column(String(100), default="Outros")
+    package_content: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    unit: Mapped[str] = mapped_column(String(20), default="UN")
+    source: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 class Sale(Base):
     __tablename__ = "sales"
