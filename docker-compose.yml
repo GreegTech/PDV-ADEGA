@@ -23,6 +23,7 @@ services:
       ACCESS_TOKEN_MINUTES: 480
       ADMIN_USER: ${ADMIN_USER:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      CATALOG_CSV_PATH: /app/data/catalogo_produtos_adega_torres.csv
     depends_on:
       db:
         condition: service_healthy
