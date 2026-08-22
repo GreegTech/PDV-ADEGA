@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Adega Torres V2</title>
+<style>
+body{margin:0;font-family:system-ui;background:#0d0f12;color:#f5f5f5}.wrap{max-width:1100px;margin:auto;padding:28px}.card{background:#171a1f;border:1px solid #30353d;border-radius:14px;padding:20px;margin:14px 0}.row{display:flex;gap:10px;flex-wrap:wrap}input,button{padding:11px;border-radius:9px;border:1px solid #343a43;background:#101216;color:white}button{background:#d8a23b;color:#17120a;font-weight:800;cursor:pointer}.hidden{display:none}.kpi{flex:1;min-width:180px}.kpi b{font-size:26px;display:block;margin-top:7px}table{width:100%;border-collapse:collapse}td,th{padding:10px;border-bottom:1px solid #30353d;text-align:left}.muted{color:#9ba6b2}
+</style></head><body><div class="wrap">
+<h1>ADEGA <span style="color:#d8a23b">TORRES</span> <small class="muted">V2</small></h1>
+<div id="login" class="card"><h2>Entrar</h2><div class="row"><input id="user" placeholder="Usuário" value="admin"><input id="pass" type="password" placeholder="Senha"><button onclick="login()">Entrar</button></div><p id="err"></p></div>
+<div id="app" class="hidden">
+<div class="row"><div class="card kpi">Produtos<b id="products">0</b></div><div class="card kpi">Unidades<b id="units">0</b></div><div class="card kpi">Estoque baixo<b id="low">0</b></div><div class="card kpi">Vendas acumuladas<b id="sales">R$ 0</b></div></div>
+<div class="card"><div class="row" style="justify-content:space-between"><h2>Produtos</h2><button onclick="load()">Atualizar</button></div><table><thead><tr><th>Produto</th><th>Categoria</th><th>Estoque</th><th>Custo</th><th>Venda</th></tr></thead><tbody id="tbody"></tbody></table></div>
+<p class="muted">Backend real: FastAPI + PostgreSQL + JWT. API em <code>:8000/docs</code>.</p>
+</div></div>
+<script>
+const API=`http://${location.hostname}:8000`; let token=localStorage.getItem("at_token");
+const brl=n=>Number(n).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+async function login(){let r=await fetch(API+"/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:user.value,password:pass.value})});if(!r.ok){err.textContent="Usuário ou senha inválidos";return}let d=await r.json();token=d.access_token;localStorage.setItem("at_token",token);show()}
+async function api(path){let r=await fetch(API+path,{headers:{Authorization:"Bearer "+token}});if(r.status==401){localStorage.removeItem("at_token");location.reload();}return r.json()}
+async function load(){let d=await api("/dashboard");products.textContent=d.products;units.textContent=d.stock_units;low.textContent=d.low_stock;sales.textContent=brl(d.sales_total);let ps=await api("/products");tbody.innerHTML=ps.map(p=>`<tr><td>${p.name}</td><td>${p.category}</td><td>${p.stock}</td><td>${brl(p.cost)}</td><td>${brl(p.price)}</td></tr>`).join("")}
+function show(){login.classList.add("hidden");app.classList.remove("hidden");load()} if(token)show();
+</script></body></html>
