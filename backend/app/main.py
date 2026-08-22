@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from decimal import Decimal, ROUND_HALF_UP
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
@@ -11,8 +11,9 @@ from .models import User, Product, CatalogProduct, Supplier, Purchase, PurchaseI
 from .schemas import Login, ProductCreate, ProductOut, CatalogProductOut, SupplierCreate, SupplierOut, PurchaseCreate, SaleCreate, StockAdjust
 from .auth import hash_password, verify_password, make_token, current_user
 from .catalog import normalize_gtin, sync_catalog
+from .nfe import parse_nfe_xml, MAX_XML_BYTES
 
-app = FastAPI(title="Adega Torres API", version="0.4.0")
+app = FastAPI(title="Adega Torres API", version="0.4.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
 MONEY = Decimal("0.01")
 def money(value): return Decimal(str(value)).quantize(MONEY, rounding=ROUND_HALF_UP)
@@ -64,11 +65,32 @@ def create_supplier(data:SupplierCreate,db:Session=Depends(get_db),user:User=Dep
     supplier=Supplier(**data.model_dump())
     try: db.add(supplier); db.commit(); db.refresh(supplier); return supplier
     except IntegrityError: db.rollback(); raise HTTPException(409,"Fornecedor/documento já cadastrado")
+@app.post("/nfe/xml/preview")
+async def nfe_xml_preview(file:UploadFile=File(...),db:Session=Depends(get_db),user:User=Depends(current_user)):
+    if file.content_type not in {"application/xml","text/xml","application/octet-stream"} and not (file.filename or "").lower().endswith(".xml"):
+        raise HTTPException(400,"Envie um arquivo XML de NF-e")
+    raw=await file.read(MAX_XML_BYTES+1)
+    try: data=parse_nfe_xml(raw)
+    except ValueError as exc: raise HTTPException(400,str(exc))
+    existing_purchase=db.scalar(select(Purchase).where(Purchase.document==data["access_key"]))
+    supplier=None
+    if data["supplier"]["document"]:
+        supplier=db.scalar(select(Supplier).where(Supplier.document==data["supplier"]["document"]))
+    for item in data["items"]:
+        product=None; catalog=None
+        if item["gtin"]:
+            product=db.scalar(select(Product).where(Product.barcode==item["gtin"]))
+            if not product: catalog=db.scalar(select(CatalogProduct).where(CatalogProduct.barcode==item["gtin"]))
+        item["match"]={"status":"registered","product_id":product.id,"product_name":product.name} if product else ({"status":"catalog","name":catalog.name,"brand":catalog.brand,"category":catalog.category} if catalog else {"status":"not_found"})
+    data["supplier_match"]={"id":supplier.id,"name":supplier.name} if supplier else None
+    data["already_imported"]=bool(existing_purchase)
+    return data
 @app.post("/purchases")
 def create_purchase(data:PurchaseCreate,db:Session=Depends(get_db),user:User=Depends(current_user)):
     if not data.items: raise HTTPException(400,"Compra sem itens")
     supplier=db.get(Supplier,data.supplier_id)
     if not supplier or not supplier.active: raise HTTPException(404,"Fornecedor não encontrado")
+    if data.document and db.scalar(select(Purchase).where(Purchase.document==data.document)): raise HTTPException(409,"Documento/NF-e já registrado")
     purchase=Purchase(supplier_id=supplier.id,document=data.document,user_id=user.id,total=0); db.add(purchase); db.flush(); total=Decimal("0")
     try:
         for line in data.items:
