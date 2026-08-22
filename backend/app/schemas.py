@@ -31,6 +31,28 @@ class CatalogProductOut(BaseModel):
     source: Optional[str] = None
     model_config = {"from_attributes": True}
 
+class SupplierCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    document: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    notes: Optional[str] = None
+
+class SupplierOut(SupplierCreate):
+    id: int
+    active: bool
+    model_config = {"from_attributes": True}
+
+class PurchaseLine(BaseModel):
+    product_id: int
+    quantity: int = Field(gt=0)
+    unit_cost: float = Field(gt=0)
+
+class PurchaseCreate(BaseModel):
+    supplier_id: int
+    document: Optional[str] = None
+    items: list[PurchaseLine]
+
 class SaleLine(BaseModel):
     product_id: int
     quantity: int = Field(gt=0)
