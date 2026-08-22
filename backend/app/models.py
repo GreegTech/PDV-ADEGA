@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Integer, Numeric, DateTime, ForeignKey, Boolean
+from sqlalchemy import String, Integer, Numeric, DateTime, ForeignKey, Boolean, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
@@ -23,7 +23,7 @@ class Product(Base):
     unit: Mapped[str] = mapped_column(String(20), default="UN")
     stock: Mapped[int] = mapped_column(Integer, default=0)
     min_stock: Mapped[int] = mapped_column(Integer, default=0)
-    cost: Mapped[float] = mapped_column(Numeric(12,2), default=0)
+    cost: Mapped[float] = mapped_column(Numeric(12,2), default=0)  # custo medio atual
     price: Mapped[float] = mapped_column(Numeric(12,2), default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -38,6 +38,40 @@ class CatalogProduct(Base):
     unit: Mapped[str] = mapped_column(String(20), default="UN")
     source: Mapped[str | None] = mapped_column(String(500), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class Supplier(Base):
+    __tablename__ = "suppliers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(180), index=True)
+    document: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class Purchase(Base):
+    __tablename__ = "purchases"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    supplier_id: Mapped[int] = mapped_column(ForeignKey("suppliers.id"), index=True)
+    document: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    total: Mapped[float] = mapped_column(Numeric(14,2), default=0)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    items: Mapped[list["PurchaseItem"]] = relationship(cascade="all, delete-orphan")
+
+class PurchaseItem(Base):
+    __tablename__ = "purchase_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    purchase_id: Mapped[int] = mapped_column(ForeignKey("purchases.id"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
+    quantity: Mapped[int] = mapped_column(Integer)
+    unit_cost: Mapped[float] = mapped_column(Numeric(12,2))
+    total_cost: Mapped[float] = mapped_column(Numeric(14,2))
+    previous_stock: Mapped[int] = mapped_column(Integer)
+    previous_avg_cost: Mapped[float] = mapped_column(Numeric(12,2))
+    new_stock: Mapped[int] = mapped_column(Integer)
+    new_avg_cost: Mapped[float] = mapped_column(Numeric(12,2))
 
 class Sale(Base):
     __tablename__ = "sales"
