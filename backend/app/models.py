@@ -25,6 +25,7 @@ class Product(Base):
     min_stock: Mapped[int] = mapped_column(Integer, default=0)
     cost: Mapped[float] = mapped_column(Numeric(12,2), default=0)
     price: Mapped[float] = mapped_column(Numeric(12,2), default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class CatalogProduct(Base):

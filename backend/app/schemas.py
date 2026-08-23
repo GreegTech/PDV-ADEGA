@@ -29,6 +29,7 @@ class ProductUpdate(BaseModel):
 
 class ProductOut(ProductCreate):
     id: int
+    active: bool = True
     model_config = {"from_attributes": True}
 
 class CatalogProductOut(BaseModel):
