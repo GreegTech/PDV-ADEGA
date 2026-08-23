@@ -24,6 +24,9 @@ services:
       ADMIN_USER: ${ADMIN_USER:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       CATALOG_CSV_PATH: /app/data/catalogo_produtos_adega_torres.csv
+      MAX_DISCOUNT_OPERATOR_PERCENT: ${MAX_DISCOUNT_OPERATOR_PERCENT:-10}
+      MAX_DISCOUNT_MANAGER_PERCENT: ${MAX_DISCOUNT_MANAGER_PERCENT:-20}
+      MAX_DISCOUNT_ADMIN_PERCENT: ${MAX_DISCOUNT_ADMIN_PERCENT:-100}
     depends_on:
       db:
         condition: service_healthy

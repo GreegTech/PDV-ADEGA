@@ -3,20 +3,24 @@ from pathlib import Path
 from decimal import Decimal, ROUND_HALF_UP
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete as sql_delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .database import Base, engine, SessionLocal, get_db, migrate_existing_schema
-from .models import User, Product, CatalogProduct, Supplier, Purchase, PurchaseItem, Sale, SaleItem, StockMovement
+from .models import User, Product, ProductPriceHistory, CatalogProduct, Supplier, Purchase, PurchaseItem, Sale, SaleItem, StockMovement
 from .schemas import Login, ProductCreate, ProductUpdate, ProductOut, CatalogProductOut, SupplierCreate, SupplierOut, PurchaseCreate, SaleCreate, StockAdjust
 from .auth import hash_password, verify_password, make_token, current_user
 from .catalog import normalize_gtin, sync_catalog
 from .nfe import parse_nfe_xml, MAX_XML_BYTES
 
-app=FastAPI(title="Adega Torres API",version="0.7.0")
+app=FastAPI(title="Adega Torres API",version="0.8.0")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=False,allow_methods=["*"],allow_headers=["*"])
 MONEY=Decimal("0.01")
 def money(value): return Decimal(str(value)).quantize(MONEY,rounding=ROUND_HALF_UP)
+def discount_limit_for_role(role:str):
+ defaults={"admin":"100","manager":"20","operator":"10"}
+ value=Decimal(str(os.getenv(f"MAX_DISCOUNT_{role.upper()}_PERCENT",defaults.get(role,"10"))))
+ return max(Decimal("0"),min(Decimal("100"),value))
 
 @app.on_event("startup")
 def startup():
@@ -28,7 +32,7 @@ def startup():
  finally:db.close()
 
 @app.get("/health")
-def health():return {"status":"ok"}
+def health():return {"status":"ok","version":"0.8.0"}
 
 @app.post("/auth/login")
 def login(data:Login,db:Session=Depends(get_db)):
@@ -68,9 +72,20 @@ def update_product(product_id:int,data:ProductUpdate,db:Session=Depends(get_db),
    duplicate=db.scalar(select(Product).where(Product.barcode==code,Product.id!=product_id))
    if duplicate:raise HTTPException(409,"Código de barras já cadastrado em outro produto")
    changes["barcode"]=code
+ old_price=money(p.price)
+ new_price=money(changes["price"]) if "price" in changes else old_price
+ if "price" in changes:changes["price"]=new_price
+ if new_price!=old_price:
+  db.add(ProductPriceHistory(product_id=p.id,old_price=old_price,new_price=new_price,reason="EDIÇÃO_MANUAL",user_id=user.id))
  for field,value in changes.items():setattr(p,field,value)
  try:db.commit();db.refresh(p);return p
  except IntegrityError:db.rollback();raise HTTPException(409,"Não foi possível salvar: verifique código de barras e dados do produto")
+
+@app.get("/products/{product_id}/price-history")
+def product_price_history(product_id:int,db:Session=Depends(get_db),user:User=Depends(current_user)):
+ if not db.get(Product,product_id):raise HTTPException(404,"Produto não encontrado")
+ rows=db.execute(select(ProductPriceHistory,User.username).join(User,User.id==ProductPriceHistory.user_id).where(ProductPriceHistory.product_id==product_id).order_by(ProductPriceHistory.created_at.desc(),ProductPriceHistory.id.desc()).limit(100)).all()
+ return [{"id":h.id,"old_price":float(h.old_price),"new_price":float(h.new_price),"reason":h.reason,"user":username,"created_at":h.created_at} for h,username in rows]
 
 @app.post("/products/{product_id}/deactivate",response_model=ProductOut)
 def deactivate_product(product_id:int,db:Session=Depends(get_db),user:User=Depends(current_user)):
@@ -94,7 +109,7 @@ def delete_product(product_id:int,db:Session=Depends(get_db),user:User=Depends(c
  movements_count=db.scalar(select(func.count(StockMovement.id)).where(StockMovement.product_id==product_id)) or 0
  if sales_count or purchases_count or movements_count:
   raise HTTPException(409,"Produto possui histórico de vendas, compras ou movimentações e não pode ser excluído. Use Desativar.")
- db.delete(p);db.commit();return {"ok":True,"id":product_id}
+ db.execute(sql_delete(ProductPriceHistory).where(ProductPriceHistory.product_id==product_id));db.delete(p);db.commit();return {"ok":True,"id":product_id}
 
 @app.get("/catalog/barcode/{barcode}")
 def catalog_by_barcode(barcode:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
@@ -185,10 +200,14 @@ def stock_movements(limit:int=100,db:Session=Depends(get_db),user:User=Depends(c
  limit=max(1,min(limit,500));rows=db.execute(select(StockMovement,Product.name,User.username).join(Product,Product.id==StockMovement.product_id).join(User,User.id==StockMovement.user_id).order_by(StockMovement.created_at.desc(),StockMovement.id.desc()).limit(limit)).all()
  return [{"id":m.id,"product_id":m.product_id,"product":product,"type":m.type,"quantity":m.quantity,"reference":m.reference,"user":username,"created_at":m.created_at} for m,product,username in rows]
 
+@app.get("/sales/discount-policy")
+def sale_discount_policy(user:User=Depends(current_user)):
+ return {"role":user.role,"max_discount_percent":float(discount_limit_for_role(user.role))}
+
 @app.post("/sales")
 def create_sale(data:SaleCreate,db:Session=Depends(get_db),user:User=Depends(current_user)):
  if not data.items:raise HTTPException(400,"Venda sem itens")
- gross=discounts=net=cmv=Decimal("0");prepared=[]
+ gross=discounts=net=cmv=Decimal("0");prepared=[];limit=discount_limit_for_role(user.role)
  try:
   for line in data.items:
    p=db.execute(select(Product).where(Product.id==line.product_id).with_for_update()).scalar_one_or_none()
@@ -197,6 +216,8 @@ def create_sale(data:SaleCreate,db:Session=Depends(get_db),user:User=Depends(cur
    if p.stock<line.quantity:raise HTTPException(400,f"Estoque insuficiente: {p.name}")
    list_price=money(p.price);discount=money(line.discount_unit);cost=money(p.cost)
    if discount>list_price:raise HTTPException(400,f"Desconto maior que o preço de tabela: {p.name}")
+   discount_pct=(discount/list_price*Decimal("100")) if list_price else Decimal("0")
+   if discount_pct>limit:raise HTTPException(403,f"Desconto de {discount_pct.quantize(MONEY)}% excede o limite de {limit}% para o perfil {user.role}: {p.name}")
    effective=money(list_price-discount);line_gross=money(list_price*line.quantity);line_discount=money(discount*line.quantity);line_net=money(effective*line.quantity);line_cmv=money(cost*line.quantity)
    gross+=line_gross;discounts+=line_discount;net+=line_net;cmv+=line_cmv;prepared.append((p,line,list_price,discount,effective,cost,line_gross,line_discount,line_net,line_cmv))
   sale=Sale(total=money(net),gross_total=money(gross),discount_total=money(discounts),cmv_total=money(cmv),gross_margin=money(net-cmv),payment_method=data.payment_method,user_id=user.id);db.add(sale);db.flush()
