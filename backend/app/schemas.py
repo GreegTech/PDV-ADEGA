@@ -56,6 +56,7 @@ class PurchaseCreate(BaseModel):
 class SaleLine(BaseModel):
     product_id: int
     quantity: int = Field(gt=0)
+    discount_unit: float = Field(default=0, ge=0)
 
 class SaleCreate(BaseModel):
     payment_method: str
