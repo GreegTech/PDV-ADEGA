@@ -13,6 +13,20 @@ def calculate(list_price, discount, cost, quantity):
     }
 
 
+def calculate_line_discount(list_price, discount_total, cost, quantity):
+    list_price=Decimal(str(list_price));discount_total=Decimal(str(discount_total));cost=Decimal(str(cost));quantity=Decimal(str(quantity))
+    gross=list_price*quantity
+    net=gross-discount_total
+    return {
+        "gross": gross,
+        "discount": discount_total,
+        "net": net,
+        "effective_unit": net/quantity,
+        "cmv": cost*quantity,
+        "margin": net-(cost*quantity),
+    }
+
+
 def discount_percent(list_price, discount):
     list_price=Decimal(str(list_price));discount=Decimal(str(discount))
     return (discount/list_price)*Decimal("100") if list_price else Decimal("0")
@@ -25,6 +39,20 @@ def test_discount_and_cmv_snapshot_math():
     assert result["net"] == Decimal("25.50")
     assert result["cmv"] == Decimal("12.60")
     assert result["margin"] == Decimal("12.90")
+
+
+def test_fixed_discount_is_total_for_line_not_per_unit():
+    result=calculate_line_discount("10.00","3.00","4.20",3)
+    assert result["gross"] == Decimal("30.00")
+    assert result["discount"] == Decimal("3.00")
+    assert result["net"] == Decimal("27.00")
+    assert result["effective_unit"] == Decimal("9.00")
+
+
+def test_fixed_line_discount_keeps_exact_total_when_not_evenly_divisible():
+    result=calculate_line_discount("10.00","1.00","4.20",3)
+    assert result["discount"] == Decimal("1.00")
+    assert result["net"] == Decimal("29.00")
 
 
 def test_discount_percentage_policy_math():
