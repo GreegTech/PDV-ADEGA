@@ -16,6 +16,7 @@ def migrate_existing_schema():
     if "brand" not in product_columns: statements.append("ALTER TABLE products ADD COLUMN brand VARCHAR(120)")
     if "package_content" not in product_columns: statements.append("ALTER TABLE products ADD COLUMN package_content VARCHAR(60)")
     if "unit" not in product_columns: statements.append("ALTER TABLE products ADD COLUMN unit VARCHAR(20) DEFAULT 'UN' NOT NULL")
+    if "active" not in product_columns: statements.append("ALTER TABLE products ADD COLUMN active BOOLEAN DEFAULT TRUE NOT NULL")
 
     sale_columns = {column["name"] for column in inspector.get_columns("sales")}
     for name in ("gross_total", "discount_total", "cmv_total", "gross_margin"):
