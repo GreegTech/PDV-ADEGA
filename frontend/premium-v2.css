@@ -1,0 +1,132 @@
+/* Adega Torres — Premium UI v2: segunda passada visual */
+
+/* Corrige o excesso de espaço vertical causado por margin:auto do main original */
+.app main{
+  margin:0 auto!important;
+  align-self:start!important;
+  min-height:100vh;
+  padding-top:30px!important;
+  padding-bottom:34px!important;
+}
+.app main>.top{
+  min-height:68px;
+  margin-bottom:20px!important;
+  display:grid!important;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:end!important;
+  gap:24px;
+}
+.app main>.top>div:first-child{align-self:end}
+.at-top-right{display:flex;align-items:center;justify-content:flex-end;gap:12px;align-self:end;padding-bottom:2px}
+.at-top-right .at-clock{white-space:nowrap;padding:7px 10px;border-radius:10px;background:rgba(14,20,27,.55);border:1px solid rgba(51,64,79,.45)}
+.at-top-right #status{white-space:nowrap}
+.top h1{line-height:1.05;margin-bottom:5px!important}
+
+/* Sidebar: deixa os itens mais precisos e o badge independente do texto */
+aside nav button{display:flex!important;align-items:center!important;gap:7px!important;width:100%!important}
+aside nav button .at-cart-badge{margin-left:auto!important;flex:0 0 auto}
+.at-cart-badge[hidden]{display:none!important}
+.at-cart-badge{min-width:19px!important;height:19px!important;padding:0 5px!important}
+aside nav button.active:after{right:12px!important}
+aside nav button:has(.at-cart-badge:not([hidden])).active:after{display:none}
+
+/* Densidade e alinhamento geral */
+.card{box-shadow:0 10px 30px rgba(0,0,0,.16)!important}
+#dashboard .kpi{min-height:112px!important;padding:18px!important}
+#dashboard .kpi strong{font-size:28px!important;margin-top:10px!important}
+#dashboard .two{align-items:stretch}
+#dashboard .two>.card{min-height:158px}
+
+/* Semântica de alertas: no mínimo = atenção; abaixo = crítico */
+#alerts p.at-alert-min{color:#ffd27a!important;background:rgba(242,184,75,.07)!important;border-color:rgba(242,184,75,.18)!important}
+#alerts p.at-alert-critical{color:#ff858b!important;background:rgba(255,107,114,.07)!important;border-color:rgba(255,107,114,.18)!important}
+
+/* PDV */
+#pdv .pdv{gap:16px!important}
+#pdv .pdv>.card:first-child{min-height:420px}
+#pdv .pdv>.card:last-child{top:30px!important}
+#pdv .products{align-content:start}
+#pdv .product{max-width:260px;width:100%}
+#pdv .section-title{align-items:flex-start!important}
+#pdv .section-title .btn{flex:0 0 auto}
+#pdv #cart>p.muted{padding:14px 0 6px;margin:0}
+#pdv .summary{margin-top:14px!important}
+.payBtn{font-weight:800!important;letter-spacing:-.01em}
+
+/* Estoque: barra de busca e tabela com melhor leitura */
+#estoque>.card{padding:18px!important}
+#estoque .toolbar{gap:10px!important;margin:12px 0 14px!important}
+#estoque .tablewrap{background:rgba(8,12,17,.28)}
+#estoque tbody td{padding-top:13px!important;padding-bottom:13px!important}
+#estoque tbody td:first-child b{font-size:13px}
+
+/* Relatórios não devem parecer perdidos no centro da tela */
+#relatorios .grid{gap:16px!important}
+#relatorios .kpi{min-height:112px!important}
+
+/* ===== Shell consistente para páginas independentes ===== */
+body.at-standalone-with-shell{padding-left:252px!important;overflow-x:hidden}
+.at-standalone-sidebar{
+  position:fixed;left:0;top:0;bottom:0;width:252px;z-index:1000;
+  display:flex;flex-direction:column;
+  padding:24px 15px 18px;
+  background:linear-gradient(180deg,#0c1117,#090d12);
+  border-right:1px solid #202834;
+  box-shadow:16px 0 42px rgba(0,0,0,.12)
+}
+.at-standalone-brand{display:flex;align-items:center;gap:11px;padding:4px 9px 26px;font-size:20px;font-weight:900;letter-spacing:-.035em}
+.at-standalone-brand .mark{display:grid;place-items:center;width:36px;height:36px;border-radius:12px;background:linear-gradient(145deg,#ffd269,#d79622);color:#171009;font-size:12px;font-weight:1000;box-shadow:0 8px 22px rgba(242,184,75,.2)}
+.at-standalone-brand b{color:#f2b84b}
+.at-standalone-nav{display:flex;flex-direction:column;gap:5px}
+.at-standalone-nav a{display:flex;align-items:center;gap:10px;min-height:44px;padding:11px 13px;border-radius:12px;text-decoration:none;color:#9da8b7;font-weight:700;border:1px solid transparent;transition:.16s ease}
+.at-standalone-nav a:hover{background:#141b24;color:#eef2f7;transform:translateX(2px)}
+.at-standalone-nav a.active{background:linear-gradient(90deg,rgba(242,184,75,.14),rgba(242,184,75,.045));color:#fff;box-shadow:inset 3px 0 #f2b84b;border-color:rgba(242,184,75,.11)}
+.at-standalone-nav svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.8;flex:0 0 auto}
+.at-standalone-footer{margin-top:auto;padding:12px;color:#778495;font-size:11px;border-top:1px solid #202834}
+.at-standalone-footer strong{display:block;color:#d8dee7;font-size:12px;margin-bottom:3px}
+body.at-standalone-with-shell main{max-width:1580px!important;margin:0 auto!important;padding:30px 34px 40px!important}
+body.at-standalone-with-shell main>.top,
+body.at-standalone-with-shell main>.row:first-child{margin-top:0!important}
+body.at-standalone-with-shell.page-movimentacoes main>.top>div:last-child{display:none!important}
+body.at-standalone-with-shell.page-compras main>.row:first-child>a.btn{display:none!important}
+
+/* Refinamento das páginas operacionais */
+.page-movimentacoes .card,.page-compras .card{box-shadow:0 10px 30px rgba(0,0,0,.14)!important}
+.page-movimentacoes .grid{grid-template-columns:minmax(250px,2fr) minmax(180px,1fr) minmax(110px,.7fr) minmax(230px,2fr) 120px!important;align-items:center}
+.page-movimentacoes table td,.page-movimentacoes table th{white-space:normal}
+.page-compras #nfeFile{max-width:300px;color:#9aa6b5}
+
+/* Modal de edição mais legível */
+#productEditModal>.card{box-shadow:0 35px 100px rgba(0,0,0,.55)!important;border-color:rgba(242,184,75,.16)!important}
+
+@media(max-width:1180px){
+  .app main{padding:24px!important}
+  #pdv .pdv{grid-template-columns:minmax(0,1fr)!important}
+  #pdv .pdv>.card:last-child{position:relative!important;top:auto!important;max-height:none!important}
+  .page-movimentacoes .grid{grid-template-columns:1fr 1fr!important}
+  .page-movimentacoes .grid #reference{grid-column:1/2}
+}
+
+@media(max-width:760px){
+  .app main{padding:14px 12px 92px!important;min-height:auto}
+  .app main>.top{min-height:auto;grid-template-columns:1fr!important;gap:10px!important;align-items:start!important;margin-bottom:14px!important}
+  .at-top-right{justify-content:space-between;width:100%;padding:0}
+  .at-top-right .at-clock{background:transparent;border:0;padding:0}
+  #pdv .product{max-width:none}
+
+  body.at-standalone-with-shell{padding-left:0!important;padding-bottom:78px!important}
+  body.at-standalone-with-shell main{padding:16px 12px 92px!important}
+  .at-standalone-sidebar{top:auto;left:8px;right:8px;bottom:8px;width:auto;height:64px;padding:6px;display:block;border:1px solid #293542;border-radius:17px;background:rgba(12,17,23,.94);backdrop-filter:blur(18px);box-shadow:0 16px 45px rgba(0,0,0,.4)}
+  .at-standalone-brand,.at-standalone-footer{display:none}
+  .at-standalone-nav{height:100%;display:grid;grid-template-columns:repeat(4,1fr);gap:3px}
+  .at-standalone-nav a{min-height:50px;padding:5px 3px;justify-content:center;flex-direction:column;gap:2px;font-size:9px;text-align:center;border-radius:12px;transform:none!important}
+  .at-standalone-nav a.active{box-shadow:inset 0 2px #f2b84b}
+  .at-standalone-nav svg{width:17px;height:17px}
+  .page-movimentacoes .grid{grid-template-columns:1fr!important}
+  .page-movimentacoes .grid #reference{grid-column:auto}
+}
+
+@media(max-width:420px){
+  .at-top-right .at-clock span{display:none}
+  .at-top-right .at-clock strong{font-size:11px}
+}
