@@ -13,7 +13,7 @@ from .auth import hash_password, verify_password, make_token, current_user
 from .catalog import normalize_gtin, sync_catalog
 from .nfe import parse_nfe_xml, MAX_XML_BYTES
 
-app=FastAPI(title="Adega Torres API",version="0.5.1")
+app=FastAPI(title="Adega Torres API",version="0.6.0")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=False,allow_methods=["*"],allow_headers=["*"])
 MONEY=Decimal("0.01")
 def money(value): return Decimal(str(value)).quantize(MONEY,rounding=ROUND_HALF_UP)
@@ -119,12 +119,28 @@ def purchase_detail(purchase_id:int,db:Session=Depends(get_db),user:User=Depends
  row=db.execute(select(Purchase,Supplier.name).join(Supplier,Supplier.id==Purchase.supplier_id).where(Purchase.id==purchase_id)).first()
  if not row:raise HTTPException(404,"Compra não encontrada")
  purchase,supplier_name=row;items=db.execute(select(PurchaseItem,Product.name,Product.barcode).join(Product,Product.id==PurchaseItem.product_id).where(PurchaseItem.purchase_id==purchase_id).order_by(PurchaseItem.id)).all();return {"id":purchase.id,"supplier_id":purchase.supplier_id,"supplier":supplier_name,"document":purchase.document,"total":float(purchase.total),"created_at":purchase.created_at,"items":[{"product_id":i.product_id,"product":name,"barcode":barcode,"quantity":i.quantity,"unit_cost":float(i.unit_cost),"total_cost":float(i.total_cost),"previous_stock":i.previous_stock,"previous_avg_cost":float(i.previous_avg_cost),"new_stock":i.new_stock,"new_avg_cost":float(i.new_avg_cost)} for i,name,barcode in items]}
+STOCK_TYPES={"ENTRADA_MANUAL":1,"DEVOLUCAO_CLIENTE":1,"BONIFICACAO":1,"AJUSTE_POSITIVO":1,"QUEBRA":-1,"AVARIA":-1,"VENCIMENTO":-1,"CONSUMO_INTERNO":-1,"PERDA_FURTO":-1,"DEVOLUCAO_FORNECEDOR":-1,"AJUSTE_NEGATIVO":-1}
 @app.post("/stock/adjust")
 def stock_adjust(data:StockAdjust,db:Session=Depends(get_db),user:User=Depends(current_user)):
- p=db.get(Product,data.product_id)
- if not p:raise HTTPException(404,"Produto não encontrado")
- if p.stock+data.quantity<0:raise HTTPException(400,"Estoque insuficiente")
- p.stock+=data.quantity;db.add(StockMovement(product_id=p.id,type=data.type,quantity=data.quantity,reference=data.reference,user_id=user.id));db.commit();return {"ok":True,"stock":p.stock,"average_cost":float(p.cost)}
+ kind=data.type.strip().upper()
+ if kind not in STOCK_TYPES:raise HTTPException(400,"Motivo de movimentação inválido")
+ qty=abs(data.quantity)
+ if qty<1:raise HTTPException(400,"Quantidade deve ser maior que zero")
+ signed=qty*STOCK_TYPES[kind]
+ try:
+  p=db.execute(select(Product).where(Product.id==data.product_id).with_for_update()).scalar_one_or_none()
+  if not p:raise HTTPException(404,"Produto não encontrado")
+  previous=p.stock;new_stock=previous+signed
+  if new_stock<0:raise HTTPException(400,"Estoque insuficiente")
+  p.stock=new_stock
+  ref=(data.reference or "").strip() or None
+  db.add(StockMovement(product_id=p.id,type=kind,quantity=signed,reference=ref,user_id=user.id));db.commit()
+  return {"ok":True,"product_id":p.id,"product":p.name,"type":kind,"quantity":signed,"previous_stock":previous,"stock":new_stock,"average_cost":float(p.cost)}
+ except Exception:db.rollback();raise
+@app.get("/stock/movements")
+def stock_movements(limit:int=100,db:Session=Depends(get_db),user:User=Depends(current_user)):
+ limit=max(1,min(limit,500));rows=db.execute(select(StockMovement,Product.name,User.username).join(Product,Product.id==StockMovement.product_id).join(User,User.id==StockMovement.user_id).order_by(StockMovement.created_at.desc(),StockMovement.id.desc()).limit(limit)).all()
+ return [{"id":m.id,"product_id":m.product_id,"product":product,"type":m.type,"quantity":m.quantity,"reference":m.reference,"user":username,"created_at":m.created_at} for m,product,username in rows]
 @app.post("/sales")
 def create_sale(data:SaleCreate,db:Session=Depends(get_db),user:User=Depends(current_user)):
  if not data.items:raise HTTPException(400,"Venda sem itens")
