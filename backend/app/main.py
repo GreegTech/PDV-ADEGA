@@ -8,12 +8,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .database import Base, engine, SessionLocal, get_db, migrate_existing_schema
 from .models import User, Product, CatalogProduct, Supplier, Purchase, PurchaseItem, Sale, SaleItem, StockMovement
-from .schemas import Login, ProductCreate, ProductOut, CatalogProductOut, SupplierCreate, SupplierOut, PurchaseCreate, SaleCreate, StockAdjust
+from .schemas import Login, ProductCreate, ProductUpdate, ProductOut, CatalogProductOut, SupplierCreate, SupplierOut, PurchaseCreate, SaleCreate, StockAdjust
 from .auth import hash_password, verify_password, make_token, current_user
 from .catalog import normalize_gtin, sync_catalog
 from .nfe import parse_nfe_xml, MAX_XML_BYTES
 
-app=FastAPI(title="Adega Torres API",version="0.5.0")
+app=FastAPI(title="Adega Torres API",version="0.5.1")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=False,allow_methods=["*"],allow_headers=["*"])
 MONEY=Decimal("0.01")
 def money(value): return Decimal(str(value)).quantize(MONEY,rounding=ROUND_HALF_UP)
@@ -45,6 +45,23 @@ def create_product(data:ProductCreate,db:Session=Depends(get_db),user:User=Depen
   db.commit();db.refresh(p)
  except IntegrityError:db.rollback();raise HTTPException(409,"Código de barras já cadastrado")
  return p
+@app.patch("/products/{product_id}",response_model=ProductOut)
+def update_product(product_id:int,data:ProductUpdate,db:Session=Depends(get_db),user:User=Depends(current_user)):
+ p=db.get(Product,product_id)
+ if not p:raise HTTPException(404,"Produto não encontrado")
+ changes=data.model_dump(exclude_unset=True)
+ if not changes:raise HTTPException(400,"Nenhuma alteração informada")
+ if "barcode" in changes:
+  barcode=(changes["barcode"] or "").strip() or None
+  if barcode:
+   code=normalize_gtin(barcode)
+   if not code:raise HTTPException(400,"GTIN/EAN inválido")
+   duplicate=db.scalar(select(Product).where(Product.barcode==code,Product.id!=product_id))
+   if duplicate:raise HTTPException(409,"Código de barras já cadastrado em outro produto")
+   changes["barcode"]=code
+ for field,value in changes.items():setattr(p,field,value)
+ try:db.commit();db.refresh(p);return p
+ except IntegrityError:db.rollback();raise HTTPException(409,"Não foi possível salvar: verifique código de barras e dados do produto")
 @app.get("/catalog/barcode/{barcode}")
 def catalog_by_barcode(barcode:str,db:Session=Depends(get_db),user:User=Depends(current_user)):
  code=normalize_gtin(barcode)
