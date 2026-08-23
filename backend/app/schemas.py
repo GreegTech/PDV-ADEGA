@@ -75,5 +75,5 @@ class SaleCreate(BaseModel):
 class StockAdjust(BaseModel):
     product_id: int
     quantity: int
-    type: str = "AJUSTE"
-    reference: Optional[str] = None
+    type: str
+    reference: Optional[str] = Field(default=None, max_length=100)
