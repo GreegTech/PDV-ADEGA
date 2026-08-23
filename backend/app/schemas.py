@@ -67,7 +67,11 @@ class PurchaseCreate(BaseModel):
 class SaleLine(BaseModel):
     product_id: int
     quantity: int = Field(gt=0)
+    # Compatibilidade com clientes antigos: desconto por unidade.
     discount_unit: float = Field(default=0, ge=0)
+    # Novo comportamento do PDV: desconto em R$ é o valor total da linha.
+    discount_total: Optional[float] = Field(default=None, ge=0)
+    discount_percent: Optional[float] = Field(default=None, ge=0, le=100)
 
 class SaleCreate(BaseModel):
     payment_method: str
