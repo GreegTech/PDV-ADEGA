@@ -23,7 +23,7 @@ class Product(Base):
     unit: Mapped[str] = mapped_column(String(20), default="UN")
     stock: Mapped[int] = mapped_column(Integer, default=0)
     min_stock: Mapped[int] = mapped_column(Integer, default=0)
-    cost: Mapped[float] = mapped_column(Numeric(12,2), default=0)  # custo medio atual
+    cost: Mapped[float] = mapped_column(Numeric(12,2), default=0)
     price: Mapped[float] = mapped_column(Numeric(12,2), default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -76,7 +76,11 @@ class PurchaseItem(Base):
 class Sale(Base):
     __tablename__ = "sales"
     id: Mapped[int] = mapped_column(primary_key=True)
-    total: Mapped[float] = mapped_column(Numeric(12,2))
+    total: Mapped[float] = mapped_column(Numeric(14,2))
+    gross_total: Mapped[float] = mapped_column(Numeric(14,2), default=0)
+    discount_total: Mapped[float] = mapped_column(Numeric(14,2), default=0)
+    cmv_total: Mapped[float] = mapped_column(Numeric(14,2), default=0)
+    gross_margin: Mapped[float] = mapped_column(Numeric(14,2), default=0)
     payment_method: Mapped[str] = mapped_column(String(30))
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -85,11 +89,18 @@ class Sale(Base):
 class SaleItem(Base):
     __tablename__ = "sale_items"
     id: Mapped[int] = mapped_column(primary_key=True)
-    sale_id: Mapped[int] = mapped_column(ForeignKey("sales.id"))
-    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
+    sale_id: Mapped[int] = mapped_column(ForeignKey("sales.id"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
     quantity: Mapped[int] = mapped_column(Integer)
-    unit_price: Mapped[float] = mapped_column(Numeric(12,2))
-    unit_cost: Mapped[float] = mapped_column(Numeric(12,2))
+    list_unit_price: Mapped[float] = mapped_column(Numeric(12,2), default=0)
+    discount_unit: Mapped[float] = mapped_column(Numeric(12,2), default=0)
+    effective_unit_price: Mapped[float] = mapped_column(Numeric(12,2), default=0)
+    unit_cost: Mapped[float] = mapped_column(Numeric(12,2), default=0)
+    gross_total: Mapped[float] = mapped_column(Numeric(14,2), default=0)
+    discount_total: Mapped[float] = mapped_column(Numeric(14,2), default=0)
+    net_total: Mapped[float] = mapped_column(Numeric(14,2), default=0)
+    cmv_total: Mapped[float] = mapped_column(Numeric(14,2), default=0)
+    unit_price: Mapped[float] = mapped_column(Numeric(12,2), default=0)  # compatibilidade histórica
 
 class StockMovement(Base):
     __tablename__ = "stock_movements"
