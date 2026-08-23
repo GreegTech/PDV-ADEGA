@@ -17,6 +17,16 @@ class ProductCreate(BaseModel):
     cost: float = Field(ge=0)
     price: float = Field(ge=0)
 
+class ProductUpdate(BaseModel):
+    name: Optional[str] = None
+    barcode: Optional[str] = None
+    brand: Optional[str] = None
+    category: Optional[str] = None
+    package_content: Optional[str] = None
+    unit: Optional[str] = None
+    min_stock: Optional[int] = Field(default=None, ge=0)
+    price: Optional[float] = Field(default=None, ge=0)
+
 class ProductOut(ProductCreate):
     id: int
     model_config = {"from_attributes": True}
