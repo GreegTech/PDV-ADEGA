@@ -28,6 +28,16 @@ class Product(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+class ProductPriceHistory(Base):
+    __tablename__ = "product_price_history"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
+    old_price: Mapped[float] = mapped_column(Numeric(12,2))
+    new_price: Mapped[float] = mapped_column(Numeric(12,2))
+    reason: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
 class CatalogProduct(Base):
     __tablename__ = "catalog_products"
     id: Mapped[int] = mapped_column(primary_key=True)
