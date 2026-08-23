@@ -13,7 +13,7 @@ from .auth import hash_password, verify_password, make_token, current_user
 from .catalog import normalize_gtin, sync_catalog
 from .nfe import parse_nfe_xml, MAX_XML_BYTES
 
-app=FastAPI(title="Adega Torres API",version="0.4.2")
+app=FastAPI(title="Adega Torres API",version="0.5.0")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=False,allow_methods=["*"],allow_headers=["*"])
 MONEY=Decimal("0.01")
 def money(value): return Decimal(str(value)).quantize(MONEY,rounding=ROUND_HALF_UP)
@@ -111,15 +111,31 @@ def stock_adjust(data:StockAdjust,db:Session=Depends(get_db),user:User=Depends(c
 @app.post("/sales")
 def create_sale(data:SaleCreate,db:Session=Depends(get_db),user:User=Depends(current_user)):
  if not data.items:raise HTTPException(400,"Venda sem itens")
- total=Decimal("0");prepared=[]
- for line in data.items:
-  p=db.get(Product,line.product_id)
-  if not p:raise HTTPException(404,f"Produto {line.product_id} não encontrado")
-  if p.stock<line.quantity:raise HTTPException(400,f"Estoque insuficiente: {p.name}")
-  total+=Decimal(p.price)*line.quantity;prepared.append((p,line))
- sale=Sale(total=total,payment_method=data.payment_method,user_id=user.id);db.add(sale);db.flush()
- for p,line in prepared:p.stock-=line.quantity;db.add(SaleItem(sale_id=sale.id,product_id=p.id,quantity=line.quantity,unit_price=p.price,unit_cost=p.cost));db.add(StockMovement(product_id=p.id,type="VENDA",quantity=-line.quantity,reference=f"VENDA:{sale.id}",user_id=user.id))
- db.commit();return {"id":sale.id,"total":float(total),"payment_method":sale.payment_method}
+ gross=discounts=net=cmv=Decimal("0");prepared=[]
+ try:
+  for line in data.items:
+   p=db.execute(select(Product).where(Product.id==line.product_id).with_for_update()).scalar_one_or_none()
+   if not p:raise HTTPException(404,f"Produto {line.product_id} não encontrado")
+   if p.stock<line.quantity:raise HTTPException(400,f"Estoque insuficiente: {p.name}")
+   list_price=money(p.price);discount=money(line.discount_unit);cost=money(p.cost)
+   if discount>list_price:raise HTTPException(400,f"Desconto maior que o preço de tabela: {p.name}")
+   effective=money(list_price-discount);line_gross=money(list_price*line.quantity);line_discount=money(discount*line.quantity);line_net=money(effective*line.quantity);line_cmv=money(cost*line.quantity)
+   gross+=line_gross;discounts+=line_discount;net+=line_net;cmv+=line_cmv;prepared.append((p,line,list_price,discount,effective,cost,line_gross,line_discount,line_net,line_cmv))
+  sale=Sale(total=money(net),gross_total=money(gross),discount_total=money(discounts),cmv_total=money(cmv),gross_margin=money(net-cmv),payment_method=data.payment_method,user_id=user.id);db.add(sale);db.flush()
+  for p,line,list_price,discount,effective,cost,line_gross,line_discount,line_net,line_cmv in prepared:
+   p.stock-=line.quantity
+   db.add(SaleItem(sale_id=sale.id,product_id=p.id,quantity=line.quantity,list_unit_price=list_price,discount_unit=discount,effective_unit_price=effective,unit_cost=cost,gross_total=line_gross,discount_total=line_discount,net_total=line_net,cmv_total=line_cmv,unit_price=effective))
+   db.add(StockMovement(product_id=p.id,type="VENDA",quantity=-line.quantity,reference=f"VENDA:{sale.id}",user_id=user.id))
+  db.commit();db.refresh(sale)
+ except Exception:db.rollback();raise
+ margin_pct=(money((sale.gross_margin/sale.total)*100) if sale.total else Decimal("0"))
+ return {"id":sale.id,"gross_total":float(sale.gross_total),"discount_total":float(sale.discount_total),"total":float(sale.total),"cmv_total":float(sale.cmv_total),"gross_margin":float(sale.gross_margin),"gross_margin_percent":float(margin_pct),"payment_method":sale.payment_method}
+@app.get("/sales/{sale_id}")
+def sale_detail(sale_id:int,db:Session=Depends(get_db),user:User=Depends(current_user)):
+ sale=db.get(Sale,sale_id)
+ if not sale:raise HTTPException(404,"Venda não encontrada")
+ rows=db.execute(select(SaleItem,Product.name,Product.barcode).join(Product,Product.id==SaleItem.product_id).where(SaleItem.sale_id==sale_id).order_by(SaleItem.id)).all()
+ return {"id":sale.id,"created_at":sale.created_at,"payment_method":sale.payment_method,"gross_total":float(sale.gross_total),"discount_total":float(sale.discount_total),"total":float(sale.total),"cmv_total":float(sale.cmv_total),"gross_margin":float(sale.gross_margin),"items":[{"product_id":i.product_id,"product":name,"barcode":barcode,"quantity":i.quantity,"list_unit_price":float(i.list_unit_price),"discount_unit":float(i.discount_unit),"effective_unit_price":float(i.effective_unit_price),"unit_cost":float(i.unit_cost),"gross_total":float(i.gross_total),"discount_total":float(i.discount_total),"net_total":float(i.net_total),"cmv_total":float(i.cmv_total),"gross_margin":float(i.net_total-i.cmv_total)} for i,name,barcode in rows]}
 @app.get("/dashboard")
 def dashboard(db:Session=Depends(get_db),user:User=Depends(current_user)):
- return {"products":db.scalar(select(func.count(Product.id))) or 0,"stock_units":int(db.scalar(select(func.coalesce(func.sum(Product.stock),0))) or 0),"low_stock":db.scalar(select(func.count(Product.id)).where(Product.stock<=Product.min_stock)) or 0,"sales_total":float(db.scalar(select(func.coalesce(func.sum(Sale.total),0))) or 0)}
+ return {"products":db.scalar(select(func.count(Product.id))) or 0,"stock_units":int(db.scalar(select(func.coalesce(func.sum(Product.stock),0))) or 0),"low_stock":db.scalar(select(func.count(Product.id)).where(Product.stock<=Product.min_stock)) or 0,"sales_total":float(db.scalar(select(func.coalesce(func.sum(Sale.total),0))) or 0),"discount_total":float(db.scalar(select(func.coalesce(func.sum(Sale.discount_total),0))) or 0),"cmv_total":float(db.scalar(select(func.coalesce(func.sum(Sale.cmv_total),0))) or 0),"gross_margin":float(db.scalar(select(func.coalesce(func.sum(Sale.gross_margin),0))) or 0)}
