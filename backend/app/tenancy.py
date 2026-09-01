@@ -11,6 +11,7 @@ from .auth import current_context, hash_password, make_token
 from .database import get_db
 from .models import (
     Company,
+    CashRegister,
     Membership,
     MembershipStore,
     Permission,
@@ -42,6 +43,10 @@ PERMISSIONS = {
     "products.write": ("Cadastrar e editar produtos", "products"),
     "inventory.read": ("Consultar estoque", "inventory"),
     "inventory.write": ("Movimentar estoque", "inventory"),
+    "inventory.transfer": ("Transferir estoque entre lojas", "inventory"),
+    "cash.read": ("Consultar caixa", "cash"),
+    "cash.operate": ("Abrir e fechar o próprio caixa", "cash"),
+    "cash.adjust": ("Realizar sangria e suprimento", "cash"),
     "sales.create": ("Realizar vendas", "sales"),
     "sales.read": ("Consultar vendas", "sales"),
     "purchases.read": ("Consultar compras", "purchases"),
@@ -63,7 +68,7 @@ ROLE_TEMPLATES = {
     "operator": {
         "name": "Operador",
         "description": "Vendas e consultas operacionais da loja autorizada.",
-        "permissions": {"dashboard.read", "products.read", "inventory.read", "sales.create", "sales.read"},
+        "permissions": {"dashboard.read", "products.read", "inventory.read", "sales.create", "sales.read", "cash.read", "cash.operate"},
     },
 }
 
@@ -119,6 +124,9 @@ def ensure_default_tenant(db: Session, admin_user: User) -> tuple[Company, Store
     if not store:
         store = Store(company_id=company.id, name="Loja Principal", code="MATRIZ")
         db.add(store)
+        db.flush()
+    if not db.scalar(select(CashRegister).where(CashRegister.store_id == store.id)):
+        db.add(CashRegister(company_id=company.id, store_id=store.id, name="Caixa Principal", code="CAIXA-01"))
         db.flush()
     roles = seed_permissions_and_roles(db, company)
     admin_user.role = "admin"
@@ -280,6 +288,7 @@ def create_company(data: CompanyCreate, db: Session = Depends(get_db), context=D
         store = Store(company_id=company.id, name=data.store_name.strip(), code="MATRIZ", document=data.document)
         db.add(store)
         db.flush()
+        db.add(CashRegister(company_id=company.id, store_id=store.id, name="Caixa Principal", code="CAIXA-01"))
         roles = seed_permissions_and_roles(db, company)
         db.add(Membership(user_id=context.id, company_id=company.id, role_id=roles["admin"].id, all_stores=True))
         db.commit()
@@ -319,6 +328,8 @@ def create_store(data: StoreCreate, db: Session = Depends(get_db), context=Depen
     )
     try:
         db.add(store)
+        db.flush()
+        db.add(CashRegister(company_id=context.company_id, store_id=store.id, name="Caixa Principal", code="CAIXA-01"))
         db.commit()
         db.refresh(store)
         return {"id": store.id, "name": store.name, "code": store.code, "document": store.document, "active": store.active}

@@ -1,14 +1,15 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .database import get_db
 from .main import discount_limit_for_role, money
-from .models import Product, Sale, SaleItem, StockMovement
+from .models import Sale, SaleItem, StockMovement
 from .schemas import SaleCreate
 from .tenancy import require
+from .inventory import get_inventory_product
+from .cash import get_open_cash_session, record_sale
 
 router = APIRouter()
 
@@ -30,23 +31,21 @@ def create_sale_line_discount(
     limit = discount_limit_for_role(user.role)
 
     try:
+        cash_session = get_open_cash_session(db, user.company_id, user.store_id, user.id, for_update=True)
+        if not cash_session:
+            raise HTTPException(409, "Abra o caixa antes de realizar vendas")
         for line in data.items:
-            p = db.execute(
-                select(Product).where(
-                    Product.id == line.product_id,
-                    Product.company_id == user.company_id,
-                    Product.store_id == user.store_id,
-                ).with_for_update()
-            ).scalar_one_or_none()
-            if not p:
+            row = get_inventory_product(db, line.product_id, user.company_id, user.store_id, for_update=True)
+            if not row:
                 raise HTTPException(404, f"Produto {line.product_id} não encontrado")
-            if not p.active:
+            p, inventory = row
+            if not p.active or not inventory.active:
                 raise HTTPException(400, f"Produto desativado e indisponível para venda: {p.name}")
-            if p.stock < line.quantity:
+            if inventory.stock < line.quantity:
                 raise HTTPException(400, f"Estoque insuficiente: {p.name}")
 
-            list_price = money(p.price)
-            cost = money(p.cost)
+            list_price = money(inventory.price)
+            cost = money(inventory.average_cost)
             line_gross = money(list_price * line.quantity)
 
             # Prioridade do contrato novo:
@@ -92,6 +91,7 @@ def create_sale_line_discount(
             prepared.append(
                 (
                     p,
+                    inventory,
                     line,
                     list_price,
                     discount_unit,
@@ -114,12 +114,14 @@ def create_sale_line_discount(
             gross_margin=money(net - cmv),
             payment_method=data.payment_method,
             user_id=user.id,
+            cash_session_id=cash_session.id,
         )
         db.add(sale)
         db.flush()
 
         for (
             p,
+            inventory,
             line,
             list_price,
             discount_unit,
@@ -130,7 +132,7 @@ def create_sale_line_discount(
             line_net,
             line_cmv,
         ) in prepared:
-            p.stock -= line.quantity
+            inventory.stock -= line.quantity
             db.add(
                 SaleItem(
                     sale_id=sale.id,
@@ -159,6 +161,7 @@ def create_sale_line_discount(
                 )
             )
 
+        record_sale(db, cash_session, sale, user.id)
         db.commit()
         db.refresh(sale)
     except Exception:

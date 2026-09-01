@@ -7,14 +7,16 @@ from sqlalchemy import select, func, delete as sql_delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .database import Base, engine, SessionLocal, get_db, migrate_existing_schema
-from .models import User, Product, ProductPriceHistory, CatalogProduct, Supplier, Purchase, PurchaseItem, Sale, SaleItem, StockMovement, Role
+from .models import User, Product, StoreInventory, ProductPriceHistory, CatalogProduct, Supplier, Purchase, PurchaseItem, Sale, SaleItem, StockMovement, Role
 from .schemas import Login, ProductCreate, ProductUpdate, ProductOut, CatalogProductOut, SupplierCreate, SupplierOut, PurchaseCreate, SaleCreate, StockAdjust
 from .auth import hash_password, verify_password, make_token, resolve_login_context
 from .tenancy import ensure_default_tenant, require, serialize_context
 from .catalog import normalize_gtin, sync_catalog
 from .nfe import parse_nfe_xml, MAX_XML_BYTES
+from .inventory import get_inventory_product, product_payload, scoped_inventory_query
+from .cash import get_open_cash_session, record_sale
 
-app=FastAPI(title="Adega Torres ERP API",version="1.0.0")
+app=FastAPI(title="Adega Torres ERP API",version="1.1.0")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=False,allow_methods=["*"],allow_headers=["*"])
 MONEY=Decimal("0.01")
 def money(value): return Decimal(str(value)).quantize(MONEY,rounding=ROUND_HALF_UP)
@@ -36,7 +38,7 @@ def startup():
  finally:db.close()
 
 @app.get("/health")
-def health():return {"status":"ok","version":"1.0.0","multi_tenant":True}
+def health():return {"status":"ok","version":"1.1.0","multi_tenant":True,"multi_store_inventory":True,"cash_control":True}
 
 @app.post("/auth/login")
 def login(data:Login,db:Session=Depends(get_db)):
@@ -47,26 +49,31 @@ def login(data:Login,db:Session=Depends(get_db)):
 
 @app.get("/products",response_model=list[ProductOut])
 def products(include_inactive:bool=False,db:Session=Depends(get_db),user=Depends(require("products.read"))):
- query=select(Product).where(Product.company_id==user.company_id,Product.store_id==user.store_id)
- if not include_inactive:query=query.where(Product.active==True)
- return db.scalars(query.order_by(Product.name)).all()
+ query=scoped_inventory_query(user.company_id,user.store_id)
+ if not include_inactive:query=query.where(Product.active==True,StoreInventory.active==True)
+ return [product_payload(product,inventory) for product,inventory in db.execute(query.order_by(Product.name)).all()]
 
 @app.post("/products",response_model=ProductOut)
 def create_product(data:ProductCreate,db:Session=Depends(get_db),user=Depends(require("products.write"))):
  barcode=data.barcode.strip() if data.barcode else None
- if barcode and db.scalar(select(Product).where(Product.store_id==user.store_id,Product.barcode==barcode)):raise HTTPException(409,"Código de barras já cadastrado nesta loja")
- p=Product(**data.model_dump(exclude={"barcode"}),barcode=barcode,active=True,company_id=user.company_id,store_id=user.store_id)
+ p=db.scalar(select(Product).where(Product.company_id==user.company_id,Product.barcode==barcode)) if barcode else None
+ if p and db.scalar(select(StoreInventory.id).where(StoreInventory.store_id==user.store_id,StoreInventory.product_id==p.id)):raise HTTPException(409,"Produto já disponível nesta loja")
+ if not p:
+  p=Product(**data.model_dump(exclude={"barcode"}),barcode=barcode,active=True,company_id=user.company_id,store_id=None)
  try:
   db.add(p);db.flush()
-  if p.stock:db.add(StockMovement(company_id=user.company_id,store_id=user.store_id,product_id=p.id,type="ENTRADA_INICIAL",quantity=p.stock,reference=f"CUSTO:{money(p.cost)}",user_id=user.id))
-  db.commit();db.refresh(p)
+  inventory=StoreInventory(company_id=user.company_id,store_id=user.store_id,product_id=p.id,stock=data.stock,min_stock=data.min_stock,average_cost=money(data.cost),price=money(data.price),active=True)
+  db.add(inventory);db.flush()
+  if inventory.stock:db.add(StockMovement(company_id=user.company_id,store_id=user.store_id,product_id=p.id,type="ENTRADA_INICIAL",quantity=inventory.stock,reference=f"CUSTO:{money(inventory.average_cost)}",user_id=user.id))
+  db.commit();db.refresh(p);db.refresh(inventory)
  except IntegrityError:db.rollback();raise HTTPException(409,"Código de barras já cadastrado")
- return p
+ return product_payload(p,inventory)
 
 @app.patch("/products/{product_id}",response_model=ProductOut)
 def update_product(product_id:int,data:ProductUpdate,db:Session=Depends(get_db),user=Depends(require("products.write"))):
- p=db.scalar(select(Product).where(Product.id==product_id,Product.company_id==user.company_id,Product.store_id==user.store_id))
- if not p:raise HTTPException(404,"Produto não encontrado")
+ row=get_inventory_product(db,product_id,user.company_id,user.store_id)
+ if not row:raise HTTPException(404,"Produto não encontrado")
+ p,inventory=row
  changes=data.model_dump(exclude_unset=True)
  if not changes:raise HTTPException(400,"Nenhuma alteração informada")
  if "barcode" in changes:
@@ -74,54 +81,64 @@ def update_product(product_id:int,data:ProductUpdate,db:Session=Depends(get_db),
   if barcode:
    code=normalize_gtin(barcode)
    if not code:raise HTTPException(400,"GTIN/EAN inválido")
-   duplicate=db.scalar(select(Product).where(Product.store_id==user.store_id,Product.barcode==code,Product.id!=product_id))
-   if duplicate:raise HTTPException(409,"Código de barras já cadastrado em outro produto")
+   duplicate=db.scalar(select(Product).where(Product.company_id==user.company_id,Product.barcode==code,Product.id!=product_id))
+   if duplicate:raise HTTPException(409,"Código de barras já cadastrado em outro produto da empresa")
    changes["barcode"]=code
- old_price=money(p.price)
+ old_price=money(inventory.price)
  new_price=money(changes["price"]) if "price" in changes else old_price
  if "price" in changes:changes["price"]=new_price
  if new_price!=old_price:
-  db.add(ProductPriceHistory(product_id=p.id,old_price=old_price,new_price=new_price,reason="EDIÇÃO_MANUAL",user_id=user.id))
- for field,value in changes.items():setattr(p,field,value)
- try:db.commit();db.refresh(p);return p
+  db.add(ProductPriceHistory(product_id=p.id,store_id=user.store_id,old_price=old_price,new_price=new_price,reason="EDIÇÃO_MANUAL",user_id=user.id))
+ for field,value in changes.items():
+  if field=="price":inventory.price=value
+  elif field=="min_stock":inventory.min_stock=value
+  else:setattr(p,field,value)
+ try:db.commit();db.refresh(p);db.refresh(inventory);return product_payload(p,inventory)
  except IntegrityError:db.rollback();raise HTTPException(409,"Não foi possível salvar: verifique código de barras e dados do produto")
 
 @app.get("/products/{product_id}/price-history")
 def product_price_history(product_id:int,db:Session=Depends(get_db),user=Depends(require("products.read"))):
- if not db.scalar(select(Product.id).where(Product.id==product_id,Product.company_id==user.company_id,Product.store_id==user.store_id)):raise HTTPException(404,"Produto não encontrado")
- rows=db.execute(select(ProductPriceHistory,User.username).join(User,User.id==ProductPriceHistory.user_id).where(ProductPriceHistory.product_id==product_id).order_by(ProductPriceHistory.created_at.desc(),ProductPriceHistory.id.desc()).limit(100)).all()
+ if not get_inventory_product(db,product_id,user.company_id,user.store_id):raise HTTPException(404,"Produto não encontrado")
+ rows=db.execute(select(ProductPriceHistory,User.username).join(User,User.id==ProductPriceHistory.user_id).where(ProductPriceHistory.product_id==product_id,ProductPriceHistory.store_id==user.store_id).order_by(ProductPriceHistory.created_at.desc(),ProductPriceHistory.id.desc()).limit(100)).all()
  return [{"id":h.id,"old_price":float(h.old_price),"new_price":float(h.new_price),"reason":h.reason,"user":username,"created_at":h.created_at} for h,username in rows]
 
 @app.post("/products/{product_id}/deactivate",response_model=ProductOut)
 def deactivate_product(product_id:int,db:Session=Depends(get_db),user=Depends(require("products.write"))):
- p=db.scalar(select(Product).where(Product.id==product_id,Product.company_id==user.company_id,Product.store_id==user.store_id))
- if not p:raise HTTPException(404,"Produto não encontrado")
- p.active=False;db.commit();db.refresh(p);return p
+ row=get_inventory_product(db,product_id,user.company_id,user.store_id)
+ if not row:raise HTTPException(404,"Produto não encontrado")
+ p,inventory=row;inventory.active=False;db.commit();return product_payload(p,inventory)
 
 @app.post("/products/{product_id}/reactivate",response_model=ProductOut)
 def reactivate_product(product_id:int,db:Session=Depends(get_db),user=Depends(require("products.write"))):
- p=db.scalar(select(Product).where(Product.id==product_id,Product.company_id==user.company_id,Product.store_id==user.store_id))
- if not p:raise HTTPException(404,"Produto não encontrado")
- p.active=True;db.commit();db.refresh(p);return p
+ row=get_inventory_product(db,product_id,user.company_id,user.store_id)
+ if not row:raise HTTPException(404,"Produto não encontrado")
+ p,inventory=row;p.active=True;inventory.active=True;db.commit();return product_payload(p,inventory)
 
 @app.delete("/products/{product_id}")
 def delete_product(product_id:int,db:Session=Depends(get_db),user=Depends(require("products.write"))):
- p=db.scalar(select(Product).where(Product.id==product_id,Product.company_id==user.company_id,Product.store_id==user.store_id))
- if not p:raise HTTPException(404,"Produto não encontrado")
- if p.stock!=0:raise HTTPException(409,"Produto possui estoque. Zere o estoque por uma movimentação antes de excluir definitivamente.")
- sales_count=db.scalar(select(func.count(SaleItem.id)).where(SaleItem.product_id==product_id)) or 0
- purchases_count=db.scalar(select(func.count(PurchaseItem.id)).where(PurchaseItem.product_id==product_id)) or 0
- movements_count=db.scalar(select(func.count(StockMovement.id)).where(StockMovement.product_id==product_id)) or 0
+ row=get_inventory_product(db,product_id,user.company_id,user.store_id)
+ if not row:raise HTTPException(404,"Produto não encontrado")
+ p,inventory=row
+ if inventory.stock!=0:raise HTTPException(409,"Produto possui estoque nesta loja. Zere o estoque antes de remover.")
+ sales_count=db.scalar(select(func.count(SaleItem.id)).join(Sale,Sale.id==SaleItem.sale_id).where(SaleItem.product_id==product_id,Sale.store_id==user.store_id)) or 0
+ purchases_count=db.scalar(select(func.count(PurchaseItem.id)).join(Purchase,Purchase.id==PurchaseItem.purchase_id).where(PurchaseItem.product_id==product_id,Purchase.store_id==user.store_id)) or 0
+ movements_count=db.scalar(select(func.count(StockMovement.id)).where(StockMovement.product_id==product_id,StockMovement.store_id==user.store_id)) or 0
  if sales_count or purchases_count or movements_count:
   raise HTTPException(409,"Produto possui histórico de vendas, compras ou movimentações e não pode ser excluído. Use Desativar.")
- db.execute(sql_delete(ProductPriceHistory).where(ProductPriceHistory.product_id==product_id));db.delete(p);db.commit();return {"ok":True,"id":product_id}
+ db.execute(sql_delete(ProductPriceHistory).where(ProductPriceHistory.product_id==product_id,ProductPriceHistory.store_id==user.store_id));db.delete(inventory);db.flush()
+ if not db.scalar(select(StoreInventory.id).where(StoreInventory.product_id==product_id)):
+  if not (db.scalar(select(func.count(SaleItem.id)).where(SaleItem.product_id==product_id)) or db.scalar(select(func.count(PurchaseItem.id)).where(PurchaseItem.product_id==product_id)) or db.scalar(select(func.count(StockMovement.id)).where(StockMovement.product_id==product_id))):db.delete(p)
+ db.commit();return {"ok":True,"id":product_id,"store_id":user.store_id}
 
 @app.get("/catalog/barcode/{barcode}")
 def catalog_by_barcode(barcode:str,db:Session=Depends(get_db),user=Depends(require("products.read"))):
  code=normalize_gtin(barcode)
  if not code:raise HTTPException(400,"GTIN/EAN inválido")
- registered=db.scalar(select(Product).where(Product.store_id==user.store_id,Product.barcode==code))
- if registered:return {"status":"registered","product":ProductOut.model_validate(registered)}
+ registered=db.scalar(select(Product).where(Product.company_id==user.company_id,Product.barcode==code))
+ if registered:
+  inventory=db.scalar(select(StoreInventory).where(StoreInventory.store_id==user.store_id,StoreInventory.product_id==registered.id))
+  if inventory:return {"status":"registered","product":ProductOut.model_validate(product_payload(registered,inventory))}
+  return {"status":"catalog","suggestion":{"barcode":registered.barcode,"name":registered.name,"brand":registered.brand,"category":registered.category,"package_content":registered.package_content,"unit":registered.unit,"source":"CATALOGO_EMPRESA"}}
  suggestion=db.scalar(select(CatalogProduct).where(CatalogProduct.barcode==code))
  if suggestion:return {"status":"catalog","suggestion":CatalogProductOut.model_validate(suggestion)}
  return {"status":"not_found","barcode":code}
@@ -146,9 +163,11 @@ async def nfe_xml_preview(file:UploadFile=File(...),db:Session=Depends(get_db),u
  for item in data["items"]:
   product=catalog=None
   if item["gtin"]:
-   product=db.scalar(select(Product).where(Product.store_id==user.store_id,Product.barcode==item["gtin"]))
+   product=db.scalar(select(Product).where(Product.company_id==user.company_id,Product.barcode==item["gtin"]))
+   inventory=db.scalar(select(StoreInventory).where(StoreInventory.store_id==user.store_id,StoreInventory.product_id==product.id)) if product else None
    if not product:catalog=db.scalar(select(CatalogProduct).where(CatalogProduct.barcode==item["gtin"]))
-  if product:item["match"]={"status":"registered","product_id":product.id,"product_name":product.name,"active":product.active}
+  if product and inventory:item["match"]={"status":"registered","product_id":product.id,"product_name":product.name,"active":product.active and inventory.active}
+  elif product:item["match"]={"status":"catalog","name":product.name,"brand":product.brand,"category":product.category,"package_content":product.package_content,"unit":product.unit,"company_product_id":product.id}
   elif catalog:item["match"]={"status":"catalog","name":catalog.name,"brand":catalog.brand,"category":catalog.category,"package_content":catalog.package_content,"unit":catalog.unit}
   else:item["match"]={"status":"not_found"}
  data["supplier_match"]={"id":supplier.id,"name":supplier.name} if supplier else None;data["already_imported"]=bool(existing);return data
@@ -162,10 +181,11 @@ def create_purchase(data:PurchaseCreate,db:Session=Depends(get_db),user=Depends(
  purchase=Purchase(company_id=user.company_id,store_id=user.store_id,supplier_id=supplier.id,document=data.document,user_id=user.id,total=0);db.add(purchase);db.flush();total=Decimal("0")
  try:
   for line in data.items:
-   product=db.execute(select(Product).where(Product.id==line.product_id,Product.company_id==user.company_id,Product.store_id==user.store_id).with_for_update()).scalar_one_or_none()
-   if not product:raise HTTPException(404,f"Produto {line.product_id} não encontrado")
-   qty=line.quantity;incoming=money(line.unit_cost);old_stock=product.stock;old_avg=money(product.cost);new_stock=old_stock+qty;new_avg=money(((old_avg*old_stock)+(incoming*qty))/new_stock);line_total=money(incoming*qty);total+=line_total
-   db.add(PurchaseItem(purchase_id=purchase.id,product_id=product.id,quantity=qty,unit_cost=incoming,total_cost=line_total,previous_stock=old_stock,previous_avg_cost=old_avg,new_stock=new_stock,new_avg_cost=new_avg));product.stock=new_stock;product.cost=new_avg;db.add(StockMovement(company_id=user.company_id,store_id=user.store_id,product_id=product.id,type="COMPRA",quantity=qty,reference=f"COMPRA:{purchase.id};CUSTO:{incoming};CMP:{old_avg}->{new_avg}",user_id=user.id))
+   row=get_inventory_product(db,line.product_id,user.company_id,user.store_id,for_update=True)
+   if not row:raise HTTPException(404,f"Produto {line.product_id} não encontrado nesta loja")
+   product,inventory=row
+   qty=line.quantity;incoming=money(line.unit_cost);old_stock=inventory.stock;old_avg=money(inventory.average_cost);new_stock=old_stock+qty;new_avg=money(((old_avg*old_stock)+(incoming*qty))/new_stock);line_total=money(incoming*qty);total+=line_total
+   db.add(PurchaseItem(purchase_id=purchase.id,product_id=product.id,quantity=qty,unit_cost=incoming,total_cost=line_total,previous_stock=old_stock,previous_avg_cost=old_avg,new_stock=new_stock,new_avg_cost=new_avg));inventory.stock=new_stock;inventory.average_cost=new_avg;db.add(StockMovement(company_id=user.company_id,store_id=user.store_id,product_id=product.id,type="COMPRA",quantity=qty,reference=f"COMPRA:{purchase.id};CUSTO:{incoming};CMP:{old_avg}->{new_avg}",user_id=user.id))
   purchase.total=money(total);db.commit();db.refresh(purchase)
  except Exception:db.rollback();raise
  return {"id":purchase.id,"supplier_id":supplier.id,"supplier":supplier.name,"document":purchase.document,"total":float(purchase.total),"items":len(data.items)}
@@ -190,14 +210,14 @@ def stock_adjust(data:StockAdjust,db:Session=Depends(get_db),user=Depends(requir
  if qty<1:raise HTTPException(400,"Quantidade deve ser maior que zero")
  signed=qty*STOCK_TYPES[kind]
  try:
-  p=db.execute(select(Product).where(Product.id==data.product_id,Product.company_id==user.company_id,Product.store_id==user.store_id).with_for_update()).scalar_one_or_none()
-  if not p:raise HTTPException(404,"Produto não encontrado")
-  previous=p.stock;new_stock=previous+signed
+  row=get_inventory_product(db,data.product_id,user.company_id,user.store_id,for_update=True)
+  if not row:raise HTTPException(404,"Produto não encontrado")
+  p,inventory=row;previous=inventory.stock;new_stock=previous+signed
   if new_stock<0:raise HTTPException(400,"Estoque insuficiente")
-  p.stock=new_stock
+  inventory.stock=new_stock
   ref=(data.reference or "").strip() or None
   db.add(StockMovement(company_id=user.company_id,store_id=user.store_id,product_id=p.id,type=kind,quantity=signed,reference=ref,user_id=user.id));db.commit()
-  return {"ok":True,"product_id":p.id,"product":p.name,"type":kind,"quantity":signed,"previous_stock":previous,"stock":new_stock,"average_cost":float(p.cost)}
+  return {"ok":True,"product_id":p.id,"product":p.name,"type":kind,"quantity":signed,"previous_stock":previous,"stock":new_stock,"average_cost":float(inventory.average_cost)}
  except Exception:db.rollback();raise
 
 @app.get("/stock/movements")
@@ -214,22 +234,26 @@ def create_sale(data:SaleCreate,db:Session=Depends(get_db),user=Depends(require(
  if not data.items:raise HTTPException(400,"Venda sem itens")
  gross=discounts=net=cmv=Decimal("0");prepared=[];limit=discount_limit_for_role(user.role)
  try:
+  cash_session=get_open_cash_session(db,user.company_id,user.store_id,user.id,for_update=True)
+  if not cash_session:raise HTTPException(409,"Abra o caixa antes de realizar vendas")
   for line in data.items:
-   p=db.execute(select(Product).where(Product.id==line.product_id,Product.company_id==user.company_id,Product.store_id==user.store_id).with_for_update()).scalar_one_or_none()
-   if not p:raise HTTPException(404,f"Produto {line.product_id} não encontrado")
-   if not p.active:raise HTTPException(400,f"Produto desativado e indisponível para venda: {p.name}")
-   if p.stock<line.quantity:raise HTTPException(400,f"Estoque insuficiente: {p.name}")
-   list_price=money(p.price);discount=money(line.discount_unit);cost=money(p.cost)
+   row=get_inventory_product(db,line.product_id,user.company_id,user.store_id,for_update=True)
+   if not row:raise HTTPException(404,f"Produto {line.product_id} não encontrado")
+   p,inventory=row
+   if not p.active or not inventory.active:raise HTTPException(400,f"Produto desativado e indisponível para venda: {p.name}")
+   if inventory.stock<line.quantity:raise HTTPException(400,f"Estoque insuficiente: {p.name}")
+   list_price=money(inventory.price);discount=money(line.discount_unit);cost=money(inventory.average_cost)
    if discount>list_price:raise HTTPException(400,f"Desconto maior que o preço de tabela: {p.name}")
    discount_pct=(discount/list_price*Decimal("100")) if list_price else Decimal("0")
    if discount_pct>limit:raise HTTPException(403,f"Desconto de {discount_pct.quantize(MONEY)}% excede o limite de {limit}% para o perfil {user.role}: {p.name}")
    effective=money(list_price-discount);line_gross=money(list_price*line.quantity);line_discount=money(discount*line.quantity);line_net=money(effective*line.quantity);line_cmv=money(cost*line.quantity)
-   gross+=line_gross;discounts+=line_discount;net+=line_net;cmv+=line_cmv;prepared.append((p,line,list_price,discount,effective,cost,line_gross,line_discount,line_net,line_cmv))
-  sale=Sale(company_id=user.company_id,store_id=user.store_id,total=money(net),gross_total=money(gross),discount_total=money(discounts),cmv_total=money(cmv),gross_margin=money(net-cmv),payment_method=data.payment_method,user_id=user.id);db.add(sale);db.flush()
-  for p,line,list_price,discount,effective,cost,line_gross,line_discount,line_net,line_cmv in prepared:
-   p.stock-=line.quantity
+   gross+=line_gross;discounts+=line_discount;net+=line_net;cmv+=line_cmv;prepared.append((p,inventory,line,list_price,discount,effective,cost,line_gross,line_discount,line_net,line_cmv))
+  sale=Sale(company_id=user.company_id,store_id=user.store_id,total=money(net),gross_total=money(gross),discount_total=money(discounts),cmv_total=money(cmv),gross_margin=money(net-cmv),payment_method=data.payment_method,user_id=user.id,cash_session_id=cash_session.id);db.add(sale);db.flush()
+  for p,inventory,line,list_price,discount,effective,cost,line_gross,line_discount,line_net,line_cmv in prepared:
+   inventory.stock-=line.quantity
    db.add(SaleItem(sale_id=sale.id,product_id=p.id,quantity=line.quantity,list_unit_price=list_price,discount_unit=discount,effective_unit_price=effective,unit_cost=cost,gross_total=line_gross,discount_total=line_discount,net_total=line_net,cmv_total=line_cmv,unit_price=effective))
    db.add(StockMovement(company_id=user.company_id,store_id=user.store_id,product_id=p.id,type="VENDA",quantity=-line.quantity,reference=f"VENDA:{sale.id}",user_id=user.id))
+  record_sale(db,cash_session,sale,user.id)
   db.commit();db.refresh(sale)
  except Exception:db.rollback();raise
  margin_pct=(money((sale.gross_margin/sale.total)*100) if sale.total else Decimal("0"))
@@ -244,4 +268,4 @@ def sale_detail(sale_id:int,db:Session=Depends(get_db),user=Depends(require("sal
 
 @app.get("/dashboard")
 def dashboard(db:Session=Depends(get_db),user=Depends(require("dashboard.read"))):
- return {"products":db.scalar(select(func.count(Product.id)).where(Product.company_id==user.company_id,Product.store_id==user.store_id,Product.active==True)) or 0,"stock_units":int(db.scalar(select(func.coalesce(func.sum(Product.stock),0)).where(Product.company_id==user.company_id,Product.store_id==user.store_id)) or 0),"low_stock":db.scalar(select(func.count(Product.id)).where(Product.company_id==user.company_id,Product.store_id==user.store_id,Product.active==True,Product.stock<=Product.min_stock)) or 0,"sales_total":float(db.scalar(select(func.coalesce(func.sum(Sale.total),0)).where(Sale.company_id==user.company_id,Sale.store_id==user.store_id)) or 0),"discount_total":float(db.scalar(select(func.coalesce(func.sum(Sale.discount_total),0)).where(Sale.company_id==user.company_id,Sale.store_id==user.store_id)) or 0),"cmv_total":float(db.scalar(select(func.coalesce(func.sum(Sale.cmv_total),0)).where(Sale.company_id==user.company_id,Sale.store_id==user.store_id)) or 0),"gross_margin":float(db.scalar(select(func.coalesce(func.sum(Sale.gross_margin),0)).where(Sale.company_id==user.company_id,Sale.store_id==user.store_id)) or 0)}
+ return {"products":db.scalar(select(func.count(StoreInventory.id)).join(Product,Product.id==StoreInventory.product_id).where(StoreInventory.company_id==user.company_id,StoreInventory.store_id==user.store_id,Product.active==True,StoreInventory.active==True)) or 0,"stock_units":int(db.scalar(select(func.coalesce(func.sum(StoreInventory.stock),0)).where(StoreInventory.company_id==user.company_id,StoreInventory.store_id==user.store_id)) or 0),"low_stock":db.scalar(select(func.count(StoreInventory.id)).join(Product,Product.id==StoreInventory.product_id).where(StoreInventory.company_id==user.company_id,StoreInventory.store_id==user.store_id,Product.active==True,StoreInventory.active==True,StoreInventory.stock<=StoreInventory.min_stock)) or 0,"sales_total":float(db.scalar(select(func.coalesce(func.sum(Sale.total),0)).where(Sale.company_id==user.company_id,Sale.store_id==user.store_id)) or 0),"discount_total":float(db.scalar(select(func.coalesce(func.sum(Sale.discount_total),0)).where(Sale.company_id==user.company_id,Sale.store_id==user.store_id)) or 0),"cmv_total":float(db.scalar(select(func.coalesce(func.sum(Sale.cmv_total),0)).where(Sale.company_id==user.company_id,Sale.store_id==user.store_id)) or 0),"gross_margin":float(db.scalar(select(func.coalesce(func.sum(Sale.gross_margin),0)).where(Sale.company_id==user.company_id,Sale.store_id==user.store_id)) or 0)}

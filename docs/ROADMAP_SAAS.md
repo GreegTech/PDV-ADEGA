@@ -25,12 +25,17 @@ Status: implementada.
 
 ## Fase 2 — Operação multi-loja
 
-- separar cadastro comercial do produto e saldo por loja;
-- tabela de inventário por `produto + loja`;
-- transferências entre lojas em duas etapas (envio e recebimento);
-- caixa por loja e por operador;
-- vendas, compras e NF-e consolidadas por unidade;
-- auditoria de divergências e ajustes.
+Status: implementada na versão 1.1.0.
+
+- cadastro comercial único do produto por empresa;
+- inventário por `produto + loja`, com saldo, custo médio, preço e estoque mínimo;
+- consolidação automática de produtos repetidos da Fase 1 sem perder históricos;
+- transferências atômicas entre lojas com saída e entrada auditáveis;
+- abertura e fechamento de caixa por loja, terminal e operador;
+- suprimento, sangria, valor esperado e diferença de fechamento;
+- vendas vinculadas ao caixa aberto e separadas por forma de pagamento;
+- compras e NF-e atualizando o inventário da loja ativa;
+- dashboard, movimentações e relatórios isolados por unidade.
 
 ## Fase 3 — Financeiro
 

@@ -15,6 +15,11 @@ ERP web multi-tenant para adegas, iniciado a partir do PDV da Adega Torres.
 - empresas, lojas, usuários, perfis e permissões
 - troca segura de empresa/loja com novo token de acesso
 - painel administrativo em `/admin.html`
+- cadastro empresarial de produto com saldo, custo, preço e estoque mínimo por loja
+- transferências atômicas entre lojas com dupla movimentação auditável
+- abertura e fechamento de caixa por loja, terminal e operador
+- sangria, suprimento, conferência e diferença de fechamento
+- vendas obrigatoriamente vinculadas a uma sessão de caixa aberta
 - autenticação de usuário
 - cadastro, edição, ativação e desativação de produtos
 - consulta de GTIN/EAN com preenchimento automático pelo catálogo
@@ -34,6 +39,7 @@ ERP web multi-tenant para adegas, iniciado a partir do PDV da Adega Torres.
 - **Bloco 1:** fornecedores, compras/entradas, CMP e NF-e.
 - **Bloco 2:** preço, descontos, CMV, histórico de preço e ciclo de vida seguro do produto.
 - **ERP SaaS — Fase 1:** fundação multi-tenant, empresas, lojas, usuários e permissões.
+- **ERP SaaS — Fase 2:** inventário multi-loja, transferências e caixa operacional.
 
 Detalhes do Bloco 2: `docs/bloco2-consolidado.md`.
 Roadmap do ERP SaaS: `docs/ROADMAP_SAAS.md`.
@@ -55,6 +61,9 @@ sistema consulta primeiro os produtos cadastrados e depois esse catálogo.
 
 Acessos:
 - Frontend: `http://IP-DO-SERVIDOR:8082`
+- Caixa: `http://IP-DO-SERVIDOR:8082/caixa.html`
+- Transferências: `http://IP-DO-SERVIDOR:8082/transferencias.html`
+- Administração: `http://IP-DO-SERVIDOR:8082/admin.html`
 - Swagger/API: `http://IP-DO-SERVIDOR:8000/docs`
 - Health: `http://IP-DO-SERVIDOR:8000/health`
 
