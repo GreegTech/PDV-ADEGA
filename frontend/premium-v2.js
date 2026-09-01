@@ -6,7 +6,9 @@
     estoque:'<svg viewBox="0 0 24 24"><path d="M4 7l8-4 8 4-8 4zM4 7v10l8 4 8-4V7M12 11v10"/></svg>',
     movimentos:'<svg viewBox="0 0 24 24"><path d="M7 7h11l-3-3M17 17H6l3 3M18 7l-3 3M6 17l3-3"/></svg>',
     compras:'<svg viewBox="0 0 24 24"><path d="M6 7h14l-1.5 8h-11zM6 7L5 3H2M9 20h.01M17 20h.01"/></svg>'
-    ,admin:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 13.5v-3l-2-.7-.8-1.8.9-1.9-2.2-2.2-1.9.9-1.8-.8-.7-2h-3l-.7 2-1.8.8-1.9-.9-2.2 2.2.9 1.9-.8 1.8-2 .7v3l2 .7.8 1.8-.9 1.9 2.2 2.2 1.9-.9 1.8.8.7 2h3l.7-2 1.8-.8 1.9.9 2.2-2.2-.9-1.9.8-1.8z"/></svg>'
+    ,admin:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 13.5v-3l-2-.7-.8-1.8.9-1.9-2.2-2.2-1.9.9-1.8-.8-.7-2h-3l-.7 2-1.8.8-1.9-.9-2.2 2.2.9 1.9-.8 1.8-2 .7v3l2 .7.8 1.8-.9 1.9 2.2 2.2 1.9-.9 1.8.8.7 2h3l.7-2 1.8-.8 1.9.9 2.2-2.2-.9-1.9.8-1.8z"/></svg>',
+    cash:'<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M7 6V4h10v2M7 11h4M16 14h.01"/></svg>',
+    transfer:'<svg viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3M18 8l-3 3M6 16l3-3"/></svg>'
   }[name]||'');
 
   function cleanStatus(){
@@ -48,13 +50,13 @@
     if(document.querySelector('.app')||document.querySelector('.at-standalone-sidebar'))return;
     const main=document.querySelector('main');if(!main)return;
     const path=location.pathname.toLowerCase();
-    const current=path.includes('movimentacoes')?'movimentos':path.includes('compras')?'compras':path.includes('editar-produtos')?'estoque':'';if(!current)return;
+    const current=path.includes('transferencias')?'transfer':path.includes('caixa')?'cash':path.includes('movimentacoes')?'movimentos':path.includes('compras')?'compras':path.includes('editar-produtos')?'estoque':'';if(!current)return;
     document.body.classList.add('at-standalone-with-shell');
     const aside=document.createElement('aside');aside.className='at-standalone-sidebar';
-    const links=[['dashboard','/','Dashboard'],['pdv','/#pdv','PDV / Venda'],['estoque','/#estoque','Produtos'],['movimentos','/movimentacoes.html','Entradas & Saídas'],['compras','/compras.html','Compras / NF-e']];
+    const links=[['dashboard','/','Dashboard'],['pdv','/#pdv','PDV / Venda'],['estoque','/#estoque','Produtos'],['movimentos','/movimentacoes.html','Movimentos'],['compras','/compras.html','Compras / NF-e'],['cash','/caixa.html','Caixa'],['transfer','/transferencias.html','Transferências']];
     aside.innerHTML=`<div class="at-standalone-brand"><span class="mark">AT</span><span>ADEGA <b>TORRES</b></span></div><nav class="at-standalone-nav">${links.map(([k,href,label])=>`<a href="${href}" class="${current===k?'active':''}">${icon(k)}<span>${label}</span></a>`).join('')}</nav><div class="at-standalone-footer"><strong>Adega Torres</strong>Operação integrada • PostgreSQL</div>`;
     document.body.prepend(aside);
-    const style=document.createElement('style');style.textContent='@media(max-width:760px){.at-standalone-nav{grid-template-columns:repeat(5,minmax(0,1fr))!important}}';document.head.appendChild(style);
+    const style=document.createElement('style');style.textContent='@media(max-width:760px){.at-standalone-nav{display:flex!important;overflow-x:auto!important}.at-standalone-nav a{flex:0 0 78px!important}}';document.head.appendChild(style);
   }
 
   function improveCartBadge(){
@@ -72,8 +74,11 @@
       const subtitle=document.querySelector('.app main>.top>div>.muted');if(subtitle)subtitle.textContent=`${ctx.company.name} • ${store?.name||'Sem loja'}`;
       const userRole=document.querySelector('.app aside .user .muted');if(userRole)userRole.textContent=ctx.role.name;
       const nav=document.getElementById('nav');
+      const addLink=(key,href,label)=>{if(!nav||nav.querySelector(`[data-module-link="${key}"]`))return;const link=document.createElement('a');link.href=href;link.dataset.moduleLink=key;link.className='at-module-link';link.innerHTML=icon(key)+`<span>${label}</span>`;nav.appendChild(link)};
+      if(ctx.permissions.includes('cash.read'))addLink('cash','/caixa.html','Caixa');
+      if(ctx.permissions.includes('inventory.transfer'))addLink('transfer','/transferencias.html','Transferências');
       if(nav&&(ctx.permissions.includes('users.manage')||ctx.permissions.includes('stores.manage'))&&!nav.querySelector('[data-admin-link]')){
-        const link=document.createElement('a');link.href='/admin.html';link.dataset.adminLink='true';link.className='at-admin-link';link.innerHTML=icon('admin')+'<span>Administração</span>';nav.appendChild(link);
+        const link=document.createElement('a');link.href='/admin.html';link.dataset.adminLink='true';link.className='at-module-link at-admin-link';link.innerHTML=icon('admin')+'<span>Administração</span>';nav.appendChild(link);
       }
       const contextsResponse=await fetch(api+'/auth/contexts',{headers});if(!contextsResponse.ok)return;
       const contexts=await contextsResponse.json(),choices=contexts.flatMap(c=>c.stores.map(s=>({companyId:c.company.id,storeId:s.id,label:`${c.company.name} • ${s.name}`})));

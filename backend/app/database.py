@@ -41,6 +41,7 @@ def migrate_existing_schema():
     sale_columns = {column["name"] for column in inspector.get_columns("sales")}
     if "company_id" not in sale_columns: statements.append("ALTER TABLE sales ADD COLUMN company_id INTEGER REFERENCES companies(id)")
     if "store_id" not in sale_columns: statements.append("ALTER TABLE sales ADD COLUMN store_id INTEGER REFERENCES stores(id)")
+    if "cash_session_id" not in sale_columns: statements.append("ALTER TABLE sales ADD COLUMN cash_session_id INTEGER REFERENCES cash_sessions(id)")
     for name in ("gross_total", "discount_total", "cmv_total", "gross_margin"):
         if name not in sale_columns: statements.append(f"ALTER TABLE sales ADD COLUMN {name} NUMERIC(14,2) DEFAULT 0 NOT NULL")
 
@@ -67,6 +68,11 @@ def migrate_existing_schema():
         with engine.begin() as connection:
             for statement in movement_statements: connection.execute(text(statement))
 
+    history_columns = {column["name"] for column in inspect(engine).get_columns("product_price_history")}
+    if "store_id" not in history_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE product_price_history ADD COLUMN store_id INTEGER REFERENCES stores(id)"))
+
     # Converte o banco single-tenant existente em Adega Torres / Loja Principal.
     # As colunas são adicionadas primeiro como opcionais, preenchidas e só então
     # passam a ser obrigatórias, evitando perda ou recriação de tabelas.
@@ -84,7 +90,10 @@ def migrate_existing_schema():
                 {"company_id": company_id},
             )
             store_id = connection.execute(text("SELECT id FROM stores WHERE company_id=:company_id ORDER BY id LIMIT 1"), {"company_id": company_id}).scalar_one()
-            for table_name in ("products", "purchases", "sales", "stock_movements"):
+            connection.execute(text("UPDATE products SET company_id=:company_id WHERE company_id IS NULL"), {"company_id": company_id})
+            connection.execute(text("UPDATE products SET store_id=:store_id WHERE store_id IS NULL"), {"store_id": store_id})
+            connection.execute(text("ALTER TABLE products ALTER COLUMN company_id SET NOT NULL"))
+            for table_name in ("purchases", "sales", "stock_movements"):
                 connection.execute(text(f"UPDATE {table_name} SET company_id=:company_id WHERE company_id IS NULL"), {"company_id": company_id})
                 connection.execute(text(f"UPDATE {table_name} SET store_id=:store_id WHERE store_id IS NULL"), {"store_id": store_id})
                 connection.execute(text(f"ALTER TABLE {table_name} ALTER COLUMN company_id SET NOT NULL"))
@@ -107,6 +116,60 @@ def migrate_existing_schema():
             }.items():
                 for column in columns:
                     connection.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table_name}_{column} ON {table_name} ({column})"))
+
+            # Fase 2: cadastro do produto passa a ser da empresa; saldo, custo e preço
+            # passam para uma linha de inventário por loja.
+            connection.execute(text("UPDATE product_price_history h SET store_id=p.store_id FROM products p WHERE h.product_id=p.id AND h.store_id IS NULL"))
+            connection.execute(text("UPDATE product_price_history SET store_id=:store_id WHERE store_id IS NULL"), {"store_id": store_id})
+            connection.execute(text("ALTER TABLE product_price_history ALTER COLUMN store_id SET NOT NULL"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_product_price_history_store_id ON product_price_history (store_id)"))
+            connection.execute(text("""
+                INSERT INTO store_inventories (company_id, store_id, product_id, stock, min_stock, average_cost, price, active, updated_at)
+                SELECT company_id, store_id, id, stock, min_stock, cost, price, active, CURRENT_TIMESTAMP
+                FROM products WHERE store_id IS NOT NULL
+                ON CONFLICT (store_id, product_id) DO NOTHING
+            """))
+            connection.execute(text("""
+                CREATE TEMP TABLE phase2_product_map ON COMMIT DROP AS
+                SELECT id AS old_id,
+                       MIN(id) OVER (PARTITION BY company_id, barcode) AS canonical_id
+                FROM products
+                WHERE barcode IS NOT NULL
+            """))
+            for child_table in ("purchase_items", "sale_items", "stock_movements", "product_price_history", "store_inventories"):
+                connection.execute(text(f"""
+                    UPDATE {child_table} child SET product_id=map.canonical_id
+                    FROM phase2_product_map map
+                    WHERE child.product_id=map.old_id AND map.old_id<>map.canonical_id
+                """))
+            connection.execute(text("DELETE FROM products p USING phase2_product_map map WHERE p.id=map.old_id AND map.old_id<>map.canonical_id"))
+            connection.execute(text("""
+                UPDATE products p
+                SET active=EXISTS (
+                    SELECT 1 FROM store_inventories inventory
+                    WHERE inventory.product_id=p.id AND inventory.active=TRUE
+                )
+                WHERE EXISTS (
+                    SELECT 1 FROM store_inventories inventory
+                    WHERE inventory.product_id=p.id
+                )
+            """))
+            connection.execute(text("ALTER TABLE products ALTER COLUMN store_id DROP NOT NULL"))
+            connection.execute(text("UPDATE products SET store_id=NULL"))
+            connection.execute(text("ALTER TABLE products DROP CONSTRAINT IF EXISTS uq_products_store_barcode"))
+            connection.execute(text("DROP INDEX IF EXISTS uq_products_store_barcode"))
+            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_products_company_barcode ON products (company_id, barcode) WHERE barcode IS NOT NULL"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_store_inventories_company_id ON store_inventories (company_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_store_inventories_store_id ON store_inventories (store_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_store_inventories_product_id ON store_inventories (product_id)"))
+            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_cash_open_register ON cash_sessions (register_id) WHERE status='OPEN'"))
+            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_cash_open_user_store ON cash_sessions (user_id, store_id) WHERE status='OPEN'"))
+            connection.execute(text("""
+                INSERT INTO cash_registers (company_id, store_id, name, code, active, created_at)
+                SELECT company_id, id, 'Caixa Principal', 'CAIXA-01', TRUE, CURRENT_TIMESTAMP
+                FROM stores
+                ON CONFLICT (store_id, code) DO NOTHING
+            """))
 
 def get_db():
     db = SessionLocal()

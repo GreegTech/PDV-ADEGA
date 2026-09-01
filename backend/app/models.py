@@ -81,10 +81,11 @@ class MembershipStore(Base):
 
 class Product(Base):
     __tablename__ = "products"
-    __table_args__ = (UniqueConstraint("store_id", "barcode", name="uq_products_store_barcode"),)
+    __table_args__ = (UniqueConstraint("company_id", "barcode", name="uq_products_company_barcode"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
-    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    # Legado da Fase 1. O produto agora é empresarial; saldo/preço/custo ficam em store_inventories.
+    store_id: Mapped[int | None] = mapped_column(ForeignKey("stores.id"), index=True, nullable=True)
     name: Mapped[str] = mapped_column(String(180), index=True)
     barcode: Mapped[str | None] = mapped_column(String(80), nullable=True)
     brand: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -98,10 +99,25 @@ class Product(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+class StoreInventory(Base):
+    __tablename__ = "store_inventories"
+    __table_args__ = (UniqueConstraint("store_id", "product_id", name="uq_inventory_store_product"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
+    stock: Mapped[int] = mapped_column(Integer, default=0)
+    min_stock: Mapped[int] = mapped_column(Integer, default=0)
+    average_cost: Mapped[float] = mapped_column(Numeric(12,2), default=0)
+    price: Mapped[float] = mapped_column(Numeric(12,2), default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 class ProductPriceHistory(Base):
     __tablename__ = "product_price_history"
     id: Mapped[int] = mapped_column(primary_key=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     old_price: Mapped[float] = mapped_column(Numeric(12,2))
     new_price: Mapped[float] = mapped_column(Numeric(12,2))
     reason: Mapped[str | None] = mapped_column(String(180), nullable=True)
@@ -169,6 +185,7 @@ class Sale(Base):
     cmv_total: Mapped[float] = mapped_column(Numeric(14,2), default=0)
     gross_margin: Mapped[float] = mapped_column(Numeric(14,2), default=0)
     payment_method: Mapped[str] = mapped_column(String(30))
+    cash_session_id: Mapped[int | None] = mapped_column(ForeignKey("cash_sessions.id"), nullable=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     items: Mapped[list["SaleItem"]] = relationship(cascade="all, delete-orphan")
@@ -200,3 +217,67 @@ class StockMovement(Base):
     reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class InventoryTransfer(Base):
+    __tablename__ = "inventory_transfers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    source_store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    destination_store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="COMPLETED", index=True)
+    notes: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    items: Mapped[list["InventoryTransferItem"]] = relationship(cascade="all, delete-orphan")
+
+class InventoryTransferItem(Base):
+    __tablename__ = "inventory_transfer_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    transfer_id: Mapped[int] = mapped_column(ForeignKey("inventory_transfers.id"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
+    quantity: Mapped[int] = mapped_column(Integer)
+    unit_cost: Mapped[float] = mapped_column(Numeric(12,2), default=0)
+    source_stock_before: Mapped[int] = mapped_column(Integer)
+    source_stock_after: Mapped[int] = mapped_column(Integer)
+    destination_stock_before: Mapped[int] = mapped_column(Integer)
+    destination_stock_after: Mapped[int] = mapped_column(Integer)
+
+class CashRegister(Base):
+    __tablename__ = "cash_registers"
+    __table_args__ = (UniqueConstraint("store_id", "code", name="uq_cash_register_store_code"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    code: Mapped[str] = mapped_column(String(40))
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class CashSession(Base):
+    __tablename__ = "cash_sessions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    register_id: Mapped[int] = mapped_column(ForeignKey("cash_registers.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="OPEN", index=True)
+    opening_amount: Mapped[float] = mapped_column(Numeric(14,2), default=0)
+    expected_cash: Mapped[float] = mapped_column(Numeric(14,2), default=0)
+    closing_amount: Mapped[float | None] = mapped_column(Numeric(14,2), nullable=True)
+    difference: Mapped[float | None] = mapped_column(Numeric(14,2), nullable=True)
+    opened_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+class CashMovement(Base):
+    __tablename__ = "cash_movements"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("cash_sessions.id"), index=True)
+    type: Mapped[str] = mapped_column(String(30), index=True)
+    amount: Mapped[float] = mapped_column(Numeric(14,2))
+    payment_method: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

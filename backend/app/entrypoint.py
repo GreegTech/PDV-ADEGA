@@ -2,6 +2,7 @@ from .main import app
 from .purge_test import router as purge_test_router
 from .sales_line_discount import router as sales_line_discount_router
 from .tenancy import router as tenancy_router
+from .operations import router as operations_router
 
 # O app principal ainda contém a rota histórica POST /sales.
 # Removemos somente essa rota antes de registrar a versão consolidada,
@@ -15,3 +16,4 @@ app.router.routes = [
 app.include_router(sales_line_discount_router)
 app.include_router(purge_test_router)
 app.include_router(tenancy_router)
+app.include_router(operations_router)

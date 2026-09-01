@@ -1,12 +1,12 @@
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import resolve_login_context
 from app.database import Base
-from app.models import Company, Membership, MembershipStore, Product, Store, User
+from app.models import Company, Membership, MembershipStore, Product, Store, StoreInventory, User
 from app.tenancy import ensure_default_tenant, role_permissions, seed_permissions_and_roles
 
 
@@ -30,7 +30,7 @@ def create_company(db, name, slug):
     return company, store, roles
 
 
-def test_same_barcode_is_isolated_by_store_and_tenant(db):
+def test_same_barcode_is_isolated_by_tenant(db):
     company_a, store_a, _ = create_company(db, "Empresa A", "empresa-a")
     company_b, store_b, _ = create_company(db, "Empresa B", "empresa-b")
     barcode = "7894900010015"
@@ -39,12 +39,27 @@ def test_same_barcode_is_isolated_by_store_and_tenant(db):
         Product(company_id=company_b.id, store_id=store_b.id, name="Produto B", barcode=barcode, cost=1, price=2),
     ])
     db.commit()
-    assert db.scalar(select(Product.name).where(Product.store_id == store_a.id)) == "Produto A"
-    assert db.scalar(select(Product.name).where(Product.store_id == store_b.id)) == "Produto B"
+    assert db.scalar(select(Product.name).where(Product.company_id == company_a.id)) == "Produto A"
+    assert db.scalar(select(Product.name).where(Product.company_id == company_b.id)) == "Produto B"
 
     db.add(Product(company_id=company_a.id, store_id=store_a.id, name="Duplicado", barcode=barcode, cost=1, price=2))
     with pytest.raises(IntegrityError):
         db.commit()
+
+
+def test_one_company_product_can_have_inventory_in_multiple_stores(db):
+    company, store_a, _ = create_company(db, "Empresa", "empresa")
+    store_b = Store(company_id=company.id, name="Filial", code="FILIAL")
+    product = Product(company_id=company.id, name="Produto único", barcode="7894900010015", cost=0, price=0)
+    db.add_all([store_b, product])
+    db.flush()
+    db.add_all([
+        StoreInventory(company_id=company.id, store_id=store_a.id, product_id=product.id, stock=10, average_cost=4, price=8),
+        StoreInventory(company_id=company.id, store_id=store_b.id, product_id=product.id, stock=3, average_cost=4.5, price=9),
+    ])
+    db.commit()
+    assert db.scalar(select(func.count(Product.id)).where(Product.company_id == company.id)) == 1
+    assert db.scalar(select(func.count(StoreInventory.id)).where(StoreInventory.product_id == product.id)) == 2
 
 
 def test_operator_has_only_operational_permissions(db):

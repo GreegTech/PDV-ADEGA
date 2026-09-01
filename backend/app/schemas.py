@@ -85,6 +85,8 @@ class ProductUpdate(BaseModel):
 
 class ProductOut(ProductCreate):
     id: int
+    inventory_id: Optional[int] = None
+    store_id: Optional[int] = None
     active: bool = True
     model_config = {"from_attributes": True}
 
@@ -138,3 +140,28 @@ class StockAdjust(BaseModel):
     quantity: int
     type: str
     reference: Optional[str] = Field(default=None, max_length=100)
+
+class InventoryTransferLine(BaseModel):
+    product_id: int
+    quantity: int = Field(gt=0)
+
+class InventoryTransferCreate(BaseModel):
+    destination_store_id: int
+    notes: Optional[str] = Field(default=None, max_length=240)
+    items: list[InventoryTransferLine]
+
+class CashOpen(BaseModel):
+    register_id: int
+    opening_amount: float = Field(default=0, ge=0)
+
+class CashRegisterCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    code: str = Field(min_length=1, max_length=40)
+
+class CashMovementCreate(BaseModel):
+    type: str
+    amount: float = Field(gt=0)
+    notes: Optional[str] = Field(default=None, max_length=240)
+
+class CashClose(BaseModel):
+    closing_amount: float = Field(ge=0)
