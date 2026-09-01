@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Administração • Adega Torres ERP</title>
+  <link rel="stylesheet" href="/premium.css">
+  <link rel="stylesheet" href="/premium-v2.css">
+  <style>
+    :root{--bg:#0d0f12;--panel:#15181d;--line:#2b3139;--text:#f4f6f8;--muted:#9ba6b2;--gold:#d8a23b;--green:#35c47c;--red:#ff7272}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif}.shell{max-width:1400px;margin:auto;padding:28px}.top,.row,.title{display:flex;align-items:center;justify-content:space-between;gap:12px}.top{margin-bottom:22px}.brand{font-size:22px;font-weight:900}.brand b{color:var(--gold)}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}.wide{grid-column:1/-1}.field{width:100%;margin-top:9px;background:#0f1216;border:1px solid var(--line);color:white;border-radius:9px;padding:11px 12px}.btn{border:0;border-radius:9px;padding:10px 14px;cursor:pointer;background:var(--gold);color:#17120a;font-weight:800;text-decoration:none}.btn.secondary{background:#242a32;color:white}.btn.danger{background:#3a2023;color:#ff9a9a}.actions{display:flex;gap:8px;flex-wrap:wrap}.message{margin:14px 0;padding:12px;border-radius:9px}.ok{background:#18271f;color:#79e1a6}.error{background:#321c20;color:#ff9a9a}.hidden{display:none!important}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{text-align:left;padding:11px 8px;border-bottom:1px solid var(--line);font-size:14px}th{color:var(--muted)}.chips{display:flex;gap:6px;flex-wrap:wrap}.chip{font-size:12px;background:#252b33;border-radius:99px;padding:5px 8px}.stores{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px}.stores label{background:#101318;padding:8px 10px;border-radius:8px}.kpi{font-size:25px;font-weight:900;color:var(--gold)}
+    @media(max-width:900px){.grid{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}.row{align-items:flex-start;flex-direction:column}table{display:block;overflow:auto}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div><div class="brand">ADEGA <b>ERP</b></div><h1>Empresas, lojas e acessos</h1><div id="identity" class="muted">Carregando contexto...</div></div>
+      <div class="actions"><select id="context" class="field"></select><a class="btn secondary" href="/">Voltar ao PDV</a><button id="logout" class="btn danger">Sair</button></div>
+    </header>
+    <div id="message"></div>
+
+    <section class="grid">
+      <article class="card"><div class="muted">Empresa ativa</div><div id="companyKpi" class="kpi">—</div></article>
+      <article class="card"><div class="muted">Lojas</div><div id="storesKpi" class="kpi">0</div></article>
+      <article class="card"><div class="muted">Usuários</div><div id="usersKpi" class="kpi">0</div></article>
+
+      <article id="companyCard" class="card hidden">
+        <h2>Nova empresa</h2>
+        <input id="companyName" class="field" placeholder="Nome fantasia">
+        <input id="companyLegalName" class="field" placeholder="Razão social">
+        <input id="companyDocument" class="field" placeholder="CNPJ/CPF">
+        <input id="companyStore" class="field" value="Loja Principal" placeholder="Nome da primeira loja">
+        <button id="createCompany" class="btn field">Criar empresa</button>
+      </article>
+
+      <article id="storeCard" class="card hidden">
+        <h2>Nova loja</h2>
+        <input id="storeName" class="field" placeholder="Nome da loja">
+        <input id="storeCode" class="field" placeholder="Código: FILIAL-01">
+        <input id="storeDocument" class="field" placeholder="CNPJ da unidade">
+        <button id="createStore" class="btn field">Criar loja</button>
+      </article>
+
+      <article id="userCard" class="card hidden">
+        <h2>Novo usuário</h2>
+        <input id="userName" class="field" placeholder="Usuário">
+        <input id="userFullName" class="field" placeholder="Nome completo">
+        <input id="userEmail" class="field" type="email" placeholder="E-mail">
+        <input id="userPassword" class="field" type="password" placeholder="Senha (mínimo 8 caracteres)">
+        <select id="userRole" class="field"></select>
+        <label><input id="allStores" type="checkbox"> Acesso a todas as lojas</label>
+        <div id="userStores" class="stores"></div>
+        <button id="createUser" class="btn field">Criar usuário</button>
+      </article>
+
+      <article class="card wide">
+        <div class="title"><div><h2>Lojas</h2><div class="muted">Unidades pertencentes à empresa ativa.</div></div></div>
+        <table><thead><tr><th>Código</th><th>Loja</th><th>Documento</th><th>Status</th></tr></thead><tbody id="storesTable"></tbody></table>
+      </article>
+
+      <article class="card wide">
+        <div class="title"><div><h2>Usuários e permissões</h2><div class="muted">O acesso é limitado às lojas e ao perfil definido.</div></div></div>
+        <table><thead><tr><th>Usuário</th><th>Perfil</th><th>Lojas</th><th>Status</th></tr></thead><tbody id="usersTable"></tbody></table>
+      </article>
+
+      <article class="card wide">
+        <h2>Matriz de permissões</h2>
+        <div id="roles"></div>
+      </article>
+    </section>
+  </main>
+  <script>
+    const API=`http://${location.hostname}:8000`,tokenKey='at_token';let token=localStorage.getItem(tokenKey),me,contexts=[],stores=[],roles=[],users=[];
+    const $=id=>document.getElementById(id),safe=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    function logout(){localStorage.removeItem(tokenKey);localStorage.removeItem('at_user');location.href='/'}
+    async function request(path,opt={}){opt.headers={...(opt.headers||{}),Authorization:'Bearer '+token};if(opt.body)opt.headers['Content-Type']='application/json';const response=await fetch(API+path,opt);let data={};try{data=await response.json()}catch{}if(response.status===401){logout();throw Error('Sessão expirada')}if(!response.ok)throw Error(data.detail||'Erro na API');return data}
+    function notify(text,error=false){$('message').innerHTML=`<div class="message ${error?'error':'ok'}">${safe(text)}</div>`;setTimeout(()=>$('message').innerHTML='',5000)}
+    function has(permission){return me?.context?.permissions?.includes(permission)}
+    function selectedStoreIds(){return [...document.querySelectorAll('#userStores input:checked')].map(x=>+x.value)}
+    function render(){
+      const company=me.context.company,store=me.context.stores.find(x=>x.id===me.context.selected_store_id);
+      $('identity').textContent=`${me.user.full_name||me.user.username} • ${company.name} • ${store?.name||'sem loja'}`;
+      $('companyKpi').textContent=company.name;$('storesKpi').textContent=stores.length;$('usersKpi').textContent=users.length;
+      $('companyCard').classList.toggle('hidden',!me.user.is_platform_admin);$('storeCard').classList.toggle('hidden',!has('stores.manage'));$('userCard').classList.toggle('hidden',!has('users.manage'));
+      $('storesTable').innerHTML=stores.map(s=>`<tr><td><b>${safe(s.code)}</b></td><td>${safe(s.name)}</td><td>${safe(s.document||'—')}</td><td>${s.active?'Ativa':'Inativa'}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">Sem lojas.</td></tr>';
+      $('userStores').innerHTML=stores.map(s=>`<label><input type="checkbox" value="${s.id}"> ${safe(s.name)}</label>`).join('');
+      $('userRole').innerHTML=roles.map(r=>`<option value="${r.code}">${safe(r.name)}</option>`).join('');
+      $('usersTable').innerHTML=users.map(u=>`<tr><td><b>${safe(u.full_name||u.username)}</b><br><span class="muted">${safe(u.username)}${u.email?' • '+safe(u.email):''}</span></td><td>${safe(u.role_name)}</td><td>${u.all_stores?'Todas':u.store_ids.map(id=>safe(stores.find(s=>s.id===id)?.name||id)).join(', ')}</td><td>${u.active?'Ativo':'Inativo'}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">Sem usuários.</td></tr>';
+      $('roles').innerHTML=roles.map(r=>`<div class="row"><div><b>${safe(r.name)}</b><div class="muted">${safe(r.description||'')}</div></div><div class="chips">${r.permissions.map(p=>`<span class="chip">${safe(p)}</span>`).join('')}</div></div>`).join('<hr style="border-color:var(--line)">');
+      $('allStores').onchange=()=>{$('userStores').classList.toggle('hidden',$('allStores').checked)};
+    }
+    async function load(){
+      if(!token)return logout();
+      me=await request('/auth/me');contexts=await request('/auth/contexts');
+      $('context').innerHTML=contexts.flatMap(c=>c.stores.map(s=>`<option value="${c.company.id}:${s.id}" ${c.company.id===me.context.company.id&&s.id===me.context.selected_store_id?'selected':''}>${safe(c.company.name)} • ${safe(s.name)}</option>`)).join('');
+      const jobs=[request('/admin/stores').catch(()=>[]),request('/admin/roles').catch(()=>[]),request('/admin/users').catch(()=>[])];[stores,roles,users]=await Promise.all(jobs);render();
+    }
+    $('context').onchange=async()=>{try{const[company_id,store_id]=$('context').value.split(':').map(Number),data=await request('/auth/switch-context',{method:'POST',body:JSON.stringify({company_id,store_id})});token=data.access_token;localStorage.setItem(tokenKey,token);localStorage.setItem('at_user',JSON.stringify(data.user));await load()}catch(e){notify(e.message,true)}};
+    $('createCompany').onclick=async()=>{try{await request('/admin/companies',{method:'POST',body:JSON.stringify({name:$('companyName').value,legal_name:$('companyLegalName').value||null,document:$('companyDocument').value||null,store_name:$('companyStore').value})});notify('Empresa criada. Selecione-a no contexto para administrar.');await load()}catch(e){notify(e.message,true)}};
+    $('createStore').onclick=async()=>{try{await request('/admin/stores',{method:'POST',body:JSON.stringify({name:$('storeName').value,code:$('storeCode').value,document:$('storeDocument').value||null})});notify('Loja criada.');await load()}catch(e){notify(e.message,true)}};
+    $('createUser').onclick=async()=>{try{await request('/admin/users',{method:'POST',body:JSON.stringify({username:$('userName').value,password:$('userPassword').value,full_name:$('userFullName').value||null,email:$('userEmail').value||null,role_code:$('userRole').value,all_stores:$('allStores').checked,store_ids:selectedStoreIds()})});notify('Usuário criado com sucesso.');await load()}catch(e){notify(e.message,true)}};
+    $('logout').onclick=logout;load().catch(e=>notify(e.message,true));
+  </script>
+</body>
+</html>

@@ -4,11 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .auth import current_user
 from .database import get_db
 from .main import discount_limit_for_role, money
-from .models import Product, Sale, SaleItem, StockMovement, User
+from .models import Product, Sale, SaleItem, StockMovement
 from .schemas import SaleCreate
+from .tenancy import require
 
 router = APIRouter()
 
@@ -17,7 +17,7 @@ router = APIRouter()
 def create_sale_line_discount(
     data: SaleCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(current_user),
+    user=Depends(require("sales.create")),
 ):
     if not data.items:
         raise HTTPException(400, "Venda sem itens")
@@ -32,7 +32,11 @@ def create_sale_line_discount(
     try:
         for line in data.items:
             p = db.execute(
-                select(Product).where(Product.id == line.product_id).with_for_update()
+                select(Product).where(
+                    Product.id == line.product_id,
+                    Product.company_id == user.company_id,
+                    Product.store_id == user.store_id,
+                ).with_for_update()
             ).scalar_one_or_none()
             if not p:
                 raise HTTPException(404, f"Produto {line.product_id} não encontrado")
@@ -101,6 +105,8 @@ def create_sale_line_discount(
             )
 
         sale = Sale(
+            company_id=user.company_id,
+            store_id=user.store_id,
             total=money(net),
             gross_total=money(gross),
             discount_total=money(discounts),
@@ -143,6 +149,8 @@ def create_sale_line_discount(
             )
             db.add(
                 StockMovement(
+                    company_id=user.company_id,
+                    store_id=user.store_id,
                     product_id=p.id,
                     type="VENDA",
                     quantity=-line.quantity,

@@ -6,6 +6,7 @@
     estoque:'<svg viewBox="0 0 24 24"><path d="M4 7l8-4 8 4-8 4zM4 7v10l8 4 8-4V7M12 11v10"/></svg>',
     movimentos:'<svg viewBox="0 0 24 24"><path d="M7 7h11l-3-3M17 17H6l3 3M18 7l-3 3M6 17l3-3"/></svg>',
     compras:'<svg viewBox="0 0 24 24"><path d="M6 7h14l-1.5 8h-11zM6 7L5 3H2M9 20h.01M17 20h.01"/></svg>'
+    ,admin:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 13.5v-3l-2-.7-.8-1.8.9-1.9-2.2-2.2-1.9.9-1.8-.8-.7-2h-3l-.7 2-1.8.8-1.9-.9-2.2 2.2.9 1.9-.8 1.8-2 .7v3l2 .7.8 1.8-.9 1.9 2.2 2.2 1.9-.9 1.8.8.7 2h3l.7-2 1.8-.8 1.9.9 2.2-2.2-.9-1.9.8-1.8z"/></svg>'
   }[name]||'');
 
   function cleanStatus(){
@@ -62,6 +63,34 @@
     if(badge.textContent.trim()==='0'&&!badge.hidden)badge.hidden=true;
   }
 
+  async function tenantContext(){
+    const app=document.querySelector('.app'),token=localStorage.getItem('at_token');if(!app||!token)return;
+    const api=`http://${location.hostname}:8000`,headers={Authorization:`Bearer ${token}`};
+    try{
+      const meResponse=await fetch(api+'/auth/me',{headers});if(!meResponse.ok)return;
+      const me=await meResponse.json(),ctx=me.context,store=ctx.stores.find(s=>s.id===ctx.selected_store_id);
+      const subtitle=document.querySelector('.app main>.top>div>.muted');if(subtitle)subtitle.textContent=`${ctx.company.name} • ${store?.name||'Sem loja'}`;
+      const userRole=document.querySelector('.app aside .user .muted');if(userRole)userRole.textContent=ctx.role.name;
+      const nav=document.getElementById('nav');
+      if(nav&&(ctx.permissions.includes('users.manage')||ctx.permissions.includes('stores.manage'))&&!nav.querySelector('[data-admin-link]')){
+        const link=document.createElement('a');link.href='/admin.html';link.dataset.adminLink='true';link.className='at-admin-link';link.innerHTML=icon('admin')+'<span>Administração</span>';nav.appendChild(link);
+      }
+      const contextsResponse=await fetch(api+'/auth/contexts',{headers});if(!contextsResponse.ok)return;
+      const contexts=await contextsResponse.json(),choices=contexts.flatMap(c=>c.stores.map(s=>({companyId:c.company.id,storeId:s.id,label:`${c.company.name} • ${s.name}`})));
+      if(choices.length>1){
+        const right=document.querySelector('.at-top-right')||document.querySelector('.app main>.top');let select=right.querySelector('.at-context-select');
+        if(!select){select=document.createElement('select');select.className='at-context-select';right.prepend(select)}
+        select.innerHTML=choices.map(c=>`<option value="${c.companyId}:${c.storeId}" ${c.companyId===ctx.company.id&&c.storeId===ctx.selected_store_id?'selected':''}>${c.label}</option>`).join('');
+        select.onchange=async()=>{const[company_id,store_id]=select.value.split(':').map(Number),response=await fetch(api+'/auth/switch-context',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({company_id,store_id})});if(!response.ok)return;const data=await response.json();localStorage.setItem('at_token',data.access_token);localStorage.setItem('at_user',JSON.stringify(data.user));location.reload()};
+      }
+    }catch{}
+  }
+
+  function watchTenantLogin(){
+    const app=document.querySelector('.app');if(!app)return;
+    new MutationObserver(()=>{if(!app.classList.contains('hidden'))setTimeout(tenantContext,100)}).observe(app,{attributes:true,attributeFilter:['class']});
+  }
+
   function observeDynamic(){
     const app=document.querySelector('.app');if(!app)return;
     let scheduled=false;
@@ -71,6 +100,6 @@
     }).observe(app,{childList:true,subtree:true,characterData:true});
   }
 
-  function init(){cleanStatus();arrangeTop();fixTitles();handleHash();classifyAlerts();standaloneShell();improveCartBadge();observeDynamic();document.documentElement.classList.add('premium-v2-ready')}
+  function init(){cleanStatus();arrangeTop();fixTitles();handleHash();classifyAlerts();standaloneShell();improveCartBadge();observeDynamic();watchTenantLogin();tenantContext();document.documentElement.classList.add('premium-v2-ready')}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(init,0));else setTimeout(init,0);
 })();

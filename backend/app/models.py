@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Integer, Numeric, DateTime, ForeignKey, Boolean, Text
+from sqlalchemy import String, Integer, Numeric, DateTime, ForeignKey, Boolean, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
@@ -8,15 +8,85 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
+    full_name: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(180), nullable=True)
     role: Mapped[str] = mapped_column(String(30), default="admin")
+    is_platform_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-class Product(Base):
-    __tablename__ = "products"
+class Company(Base):
+    __tablename__ = "companies"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(180), index=True)
-    barcode: Mapped[str | None] = mapped_column(String(80), unique=True, nullable=True)
+    legal_name: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    document: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True)
+    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class Store(Base):
+    __tablename__ = "stores"
+    __table_args__ = (UniqueConstraint("company_id", "code", name="uq_store_company_code"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    code: Mapped[str] = mapped_column(String(40))
+    document: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class Permission(Base):
+    __tablename__ = "permissions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    module: Mapped[str] = mapped_column(String(60), index=True)
+
+class Role(Base):
+    __tablename__ = "roles"
+    __table_args__ = (UniqueConstraint("company_id", "code", name="uq_role_company_code"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    code: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(80))
+    description: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    system: Mapped[bool] = mapped_column(Boolean, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+class RolePermission(Base):
+    __tablename__ = "role_permissions"
+    __table_args__ = (UniqueConstraint("role_id", "permission_id", name="uq_role_permission"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    role_id: Mapped[int] = mapped_column(ForeignKey("roles.id", ondelete="CASCADE"), index=True)
+    permission_id: Mapped[int] = mapped_column(ForeignKey("permissions.id", ondelete="CASCADE"), index=True)
+
+class Membership(Base):
+    __tablename__ = "memberships"
+    __table_args__ = (UniqueConstraint("user_id", "company_id", name="uq_membership_user_company"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"), index=True)
+    all_stores: Mapped[bool] = mapped_column(Boolean, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class MembershipStore(Base):
+    __tablename__ = "membership_stores"
+    __table_args__ = (UniqueConstraint("membership_id", "store_id", name="uq_membership_store"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    membership_id: Mapped[int] = mapped_column(ForeignKey("memberships.id", ondelete="CASCADE"), index=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="CASCADE"), index=True)
+
+class Product(Base):
+    __tablename__ = "products"
+    __table_args__ = (UniqueConstraint("store_id", "barcode", name="uq_products_store_barcode"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), index=True)
+    barcode: Mapped[str | None] = mapped_column(String(80), nullable=True)
     brand: Mapped[str | None] = mapped_column(String(120), nullable=True)
     category: Mapped[str] = mapped_column(String(80), default="Outros")
     package_content: Mapped[str | None] = mapped_column(String(60), nullable=True)
@@ -52,9 +122,11 @@ class CatalogProduct(Base):
 
 class Supplier(Base):
     __tablename__ = "suppliers"
+    __table_args__ = (UniqueConstraint("company_id", "document", name="uq_suppliers_company_document"),)
     id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
     name: Mapped[str] = mapped_column(String(180), index=True)
-    document: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True)
+    document: Mapped[str | None] = mapped_column(String(30), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
     email: Mapped[str | None] = mapped_column(String(180), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -64,6 +136,8 @@ class Supplier(Base):
 class Purchase(Base):
     __tablename__ = "purchases"
     id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     supplier_id: Mapped[int] = mapped_column(ForeignKey("suppliers.id"), index=True)
     document: Mapped[str | None] = mapped_column(String(80), nullable=True)
     total: Mapped[float] = mapped_column(Numeric(14,2), default=0)
@@ -87,6 +161,8 @@ class PurchaseItem(Base):
 class Sale(Base):
     __tablename__ = "sales"
     id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     total: Mapped[float] = mapped_column(Numeric(14,2))
     gross_total: Mapped[float] = mapped_column(Numeric(14,2), default=0)
     discount_total: Mapped[float] = mapped_column(Numeric(14,2), default=0)
@@ -116,6 +192,8 @@ class SaleItem(Base):
 class StockMovement(Base):
     __tablename__ = "stock_movements"
     id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
     type: Mapped[str] = mapped_column(String(30))
     quantity: Mapped[int] = mapped_column(Integer)
