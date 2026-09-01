@@ -4,6 +4,62 @@ from typing import Optional
 class Login(BaseModel):
     username: str
     password: str
+    company_id: Optional[int] = None
+    store_id: Optional[int] = None
+
+class ContextSwitch(BaseModel):
+    company_id: int
+    store_id: int
+
+class CompanyCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    legal_name: Optional[str] = Field(default=None, max_length=180)
+    document: Optional[str] = Field(default=None, max_length=30)
+    slug: Optional[str] = Field(default=None, max_length=80)
+    store_name: str = Field(default="Loja Principal", min_length=2, max_length=180)
+
+class CompanyUpdate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    legal_name: Optional[str] = Field(default=None, max_length=180)
+    document: Optional[str] = Field(default=None, max_length=30)
+
+class StoreCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    code: str = Field(min_length=1, max_length=40)
+    document: Optional[str] = Field(default=None, max_length=30)
+
+class StoreUpdate(StoreCreate):
+    active: bool = True
+
+class RoleCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    code: Optional[str] = Field(default=None, max_length=40)
+    description: Optional[str] = Field(default=None, max_length=240)
+    permission_codes: list[str] = Field(default_factory=list)
+
+class RoleUpdate(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    description: Optional[str] = Field(default=None, max_length=240)
+    permission_codes: list[str] = Field(default_factory=list)
+    active: bool = True
+
+class TenantUserCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=80)
+    password: str = Field(min_length=8, max_length=128)
+    full_name: Optional[str] = Field(default=None, max_length=180)
+    email: Optional[str] = Field(default=None, max_length=180)
+    role_code: str
+    all_stores: bool = False
+    store_ids: list[int] = Field(default_factory=list)
+
+class MembershipUpdate(BaseModel):
+    role_code: str
+    all_stores: bool = False
+    store_ids: list[int] = Field(default_factory=list)
+    active: bool = True
+    full_name: Optional[str] = Field(default=None, max_length=180)
+    email: Optional[str] = Field(default=None, max_length=180)
+    new_password: Optional[str] = Field(default=None, min_length=8, max_length=128)
 
 class ProductCreate(BaseModel):
     name: str

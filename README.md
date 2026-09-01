@@ -1,6 +1,6 @@
-# Adega Torres — PDV
+# Adega Torres — ERP SaaS
 
-MVP web para gestão da Adega Torres.
+ERP web multi-tenant para adegas, iniciado a partir do PDV da Adega Torres.
 
 ## Stack
 - FastAPI
@@ -11,6 +11,10 @@ MVP web para gestão da Adega Torres.
 - Nginx
 
 ## Recursos atuais
+- isolamento de dados por empresa e loja
+- empresas, lojas, usuários, perfis e permissões
+- troca segura de empresa/loja com novo token de acesso
+- painel administrativo em `/admin.html`
 - autenticação de usuário
 - cadastro, edição, ativação e desativação de produtos
 - consulta de GTIN/EAN com preenchimento automático pelo catálogo
@@ -29,8 +33,10 @@ MVP web para gestão da Adega Torres.
 
 - **Bloco 1:** fornecedores, compras/entradas, CMP e NF-e.
 - **Bloco 2:** preço, descontos, CMV, histórico de preço e ciclo de vida seguro do produto.
+- **ERP SaaS — Fase 1:** fundação multi-tenant, empresas, lojas, usuários e permissões.
 
 Detalhes do Bloco 2: `docs/bloco2-consolidado.md`.
+Roadmap do ERP SaaS: `docs/ROADMAP_SAAS.md`.
 
 ## Executar
 

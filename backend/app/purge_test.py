@@ -3,18 +3,18 @@ from sqlalchemy import select, func, delete as sql_delete
 from sqlalchemy.orm import Session
 
 from .database import get_db
-from .models import User, Product, ProductPriceHistory, Purchase, PurchaseItem, SaleItem, StockMovement
-from .auth import current_user
+from .models import Product, ProductPriceHistory, Purchase, PurchaseItem, SaleItem, StockMovement
+from .tenancy import require
 
 router = APIRouter()
 
 
 @router.delete('/admin/test-products/{product_id}')
-def purge_test_product(product_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def purge_test_product(product_id: int, db: Session = Depends(get_db), user=Depends(require("companies.manage"))):
     if user.role != 'admin':
         raise HTTPException(403, 'Apenas administradores podem excluir dados de teste definitivamente')
 
-    product = db.get(Product, product_id)
+    product = db.scalar(select(Product).where(Product.id == product_id, Product.company_id == user.company_id, Product.store_id == user.store_id))
     if not product:
         raise HTTPException(404, 'Produto não encontrado')
     if product.active:
@@ -38,7 +38,7 @@ def purge_test_product(product_id: int, db: Session = Depends(get_db), user: Use
         removed_purchases = 0
         updated_purchases = 0
         for purchase_id in purchase_ids:
-            purchase = db.get(Purchase, purchase_id)
+            purchase = db.scalar(select(Purchase).where(Purchase.id == purchase_id, Purchase.company_id == user.company_id, Purchase.store_id == user.store_id))
             if not purchase:
                 continue
             remaining_count = db.scalar(select(func.count(PurchaseItem.id)).where(PurchaseItem.purchase_id == purchase_id)) or 0

@@ -29,6 +29,10 @@ aside nav button .at-cart-badge{margin-left:auto!important;flex:0 0 auto}
 .at-cart-badge{min-width:19px!important;height:19px!important;padding:0 5px!important}
 aside nav button.active:after{right:12px!important}
 aside nav button:has(.at-cart-badge:not([hidden])).active:after{display:none}
+.at-admin-link{display:flex!important;align-items:center!important;gap:7px!important;width:100%!important;padding:12px 14px!important;border-radius:12px!important;font-weight:650!important;color:#9da8b7!important;text-decoration:none!important}
+.at-admin-link:hover{background:#141b24!important;color:#eef2f7!important}
+.at-admin-link svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8}
+.at-context-select{max-width:260px;background:#111820;border:1px solid #33404f;color:#eef2f7;border-radius:10px;padding:8px 10px}
 
 /* Densidade e alinhamento geral */
 .card{box-shadow:0 10px 30px rgba(0,0,0,.16)!important}
@@ -108,6 +112,10 @@ body.at-standalone-with-shell.page-compras main>.row:first-child>a.btn{display:n
 }
 
 @media(max-width:760px){
+  .app aside nav{grid-template-columns:repeat(6,1fr)!important}
+  .app aside nav .at-admin-link{height:100%;min-width:0!important;padding:7px 4px!important;margin:0!important;text-align:center!important;font-size:10px!important;line-height:1.15;display:flex!important;align-items:center!important;justify-content:center!important}
+  .app aside nav .at-admin-link svg{display:none}
+  .at-context-select{max-width:180px;font-size:11px;padding:6px}
   .app main{padding:14px 12px 92px!important;min-height:auto}
   .app main>.top{min-height:auto;grid-template-columns:1fr!important;gap:10px!important;align-items:start!important;margin-bottom:14px!important}
   .at-top-right{justify-content:space-between;width:100%;padding:0}
