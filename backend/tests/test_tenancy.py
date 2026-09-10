@@ -10,7 +10,7 @@ from app.finance import FinancialAccount, FinancialCategory
 from app.finance_seed import DEFAULT_CATEGORIES
 from app.models import Company, Membership, MembershipStore, Product, Store, StoreInventory, User
 from app.schemas import CompanyCreate
-from app.tenancy import create_company, ensure_default_tenant, role_permissions, seed_permissions_and_roles
+from app.tenancy import create_company as create_company_endpoint, ensure_default_tenant, role_permissions, seed_permissions_and_roles
 
 
 @pytest.fixture()
@@ -129,7 +129,7 @@ def test_new_company_is_created_with_finance_defaults(db):
     db.commit()
 
     context = type("Context", (), {"id": admin.id, "user": admin})()
-    result = create_company(
+    result = create_company_endpoint(
         CompanyCreate(name="Empresa Nova", slug="empresa-nova", store_name="Matriz"),
         db,
         context,
@@ -172,7 +172,7 @@ def test_company_creation_rolls_back_when_finance_provisioning_fails(db, monkeyp
     )
 
     with pytest.raises(RuntimeError, match="falha simulada"):
-        create_company(
+        create_company_endpoint(
             CompanyCreate(
                 name="Empresa Incompleta",
                 slug="empresa-incompleta",
