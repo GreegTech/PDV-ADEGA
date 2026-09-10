@@ -291,11 +291,18 @@ def create_company(data: CompanyCreate, db: Session = Depends(get_db), context=D
         db.add(CashRegister(company_id=company.id, store_id=store.id, name="Caixa Principal", code="CAIXA-01"))
         roles = seed_permissions_and_roles(db, company)
         db.add(Membership(user_id=context.id, company_id=company.id, role_id=roles["admin"].id, all_stores=True))
+        # Import local evita ciclo entre tenancy e finance_seed durante o carregamento.
+        from .finance_seed import seed_finance_defaults_for_company
+
+        seed_finance_defaults_for_company(db, company)
         db.commit()
         return {"id": company.id, "name": company.name, "slug": company.slug, "store_id": store.id}
     except IntegrityError:
         db.rollback()
         raise HTTPException(409, "Empresa, CNPJ/CPF ou identificador já cadastrado")
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.patch("/admin/company")
