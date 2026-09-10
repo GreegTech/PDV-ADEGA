@@ -6,8 +6,11 @@ from sqlalchemy.orm import Session
 
 from app.auth import resolve_login_context
 from app.database import Base
+from app.finance import FinancialAccount, FinancialCategory
+from app.finance_seed import DEFAULT_CATEGORIES
 from app.models import Company, Membership, MembershipStore, Product, Store, StoreInventory, User
-from app.tenancy import ensure_default_tenant, role_permissions, seed_permissions_and_roles
+from app.schemas import CompanyCreate
+from app.tenancy import create_company, ensure_default_tenant, role_permissions, seed_permissions_and_roles
 
 
 @pytest.fixture()
@@ -113,3 +116,70 @@ def test_legacy_users_are_migrated_to_default_company(db):
             MembershipStore.store_id == store.id,
         )
     ) is not None
+
+
+def test_new_company_is_created_with_finance_defaults(db):
+    admin = User(
+        username="platform-admin",
+        password_hash="hash",
+        role="admin",
+        is_platform_admin=True,
+    )
+    db.add(admin)
+    db.commit()
+
+    context = type("Context", (), {"id": admin.id, "user": admin})()
+    result = create_company(
+        CompanyCreate(name="Empresa Nova", slug="empresa-nova", store_name="Matriz"),
+        db,
+        context,
+    )
+
+    categories = db.scalars(
+        select(FinancialCategory).where(FinancialCategory.company_id == result["id"])
+    ).all()
+    accounts = db.scalars(
+        select(FinancialAccount).where(FinancialAccount.company_id == result["id"])
+    ).all()
+    roles = seed_permissions_and_roles(db, db.get(Company, result["id"]))
+
+    assert len(categories) == len(DEFAULT_CATEGORIES) == 9
+    assert len(accounts) == 1
+    assert accounts[0].store_id == result["store_id"]
+    assert accounts[0].code == f"LOJA-{result['store_id']}-CAIXA"
+    for role_code in ("admin", "manager"):
+        permissions = role_permissions(db, roles[role_code].id)
+        assert {"finance.read", "finance.write", "finance.settle", "finance.reports"} <= permissions
+
+
+def test_company_creation_rolls_back_when_finance_provisioning_fails(db, monkeypatch):
+    admin = User(
+        username="platform-admin",
+        password_hash="hash",
+        role="admin",
+        is_platform_admin=True,
+    )
+    db.add(admin)
+    db.commit()
+    context = type("Context", (), {"id": admin.id, "user": admin})()
+
+    def fail_provisioning(session, company):
+        raise RuntimeError("falha simulada no provisionamento financeiro")
+
+    monkeypatch.setattr(
+        "app.finance_seed.seed_finance_defaults_for_company",
+        fail_provisioning,
+    )
+
+    with pytest.raises(RuntimeError, match="falha simulada"):
+        create_company(
+            CompanyCreate(
+                name="Empresa Incompleta",
+                slug="empresa-incompleta",
+                store_name="Matriz",
+            ),
+            db,
+            context,
+        )
+
+    assert db.scalar(select(Company.id).where(Company.slug == "empresa-incompleta")) is None
